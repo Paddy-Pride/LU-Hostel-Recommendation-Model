@@ -33,38 +33,6 @@ st.markdown("""
     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     margin-bottom: 20px;
 }
-.chat-message {
-    display: flex;
-    margin-bottom: 10px;
-}
-.user-message {
-    justify-content: flex-end;
-}
-.bot-message {
-    justify-content: flex-start;
-}
-.message-bubble {
-    max-width: 70%;
-    padding: 12px 16px;
-    border-radius: 12px;
-    position: relative;
-    word-wrap: break-word;
-}
-.user-bubble {
-    background: #003366;
-    color: white;
-    border-bottom-right-radius: 4px;
-}
-.bot-bubble {
-    background: #e8edf5;
-    color: #003366;
-    border-bottom-left-radius: 4px;
-}
-.timestamp {
-    font-size: 10px;
-    color: #999;
-    margin-top: 4px;
-}
 .card {
     background: white;
     padding: 20px;
@@ -139,7 +107,7 @@ def load_model():
         return None
 
 # ---------------------------------------
-# IMPROVED RECOMMENDATION ENGINE
+# RECOMMENDATION ENGINE
 # ---------------------------------------
 def calculate_match_score(hostel, preferences):
     """Calculate a comprehensive match score for a hostel"""
@@ -228,7 +196,7 @@ def calculate_match_score(hostel, preferences):
 def get_recommendations(df, model, preferences, n=5):
     """Get recommendations using both AI model AND rule-based scoring"""
     
-    # First, try to use the AI model
+    # Try to use the AI model
     ai_scores = []
     if model is not None:
         try:
@@ -249,7 +217,6 @@ def get_recommendations(df, model, preferences, n=5):
                 score = model.predict(input_df)[0]
                 ai_scores.append(score)
         except Exception as e:
-            st.warning(f"Model prediction issue: {str(e)}")
             ai_scores = None
     
     # Calculate rule-based scores for each hostel
@@ -260,18 +227,15 @@ def get_recommendations(df, model, preferences, n=5):
         # Get AI score if available
         ai_score = ai_scores[idx] if ai_scores else 3.0
         
-        # Combine scores: 60% rule-based, 40% AI
-        # But if all AI scores are the same (model not working), rely more on rule-based
+        # Combine scores
         if ai_scores and len(set(ai_scores)) > 1:
-            # Normalize AI scores to 0-100
             ai_min, ai_max = min(ai_scores), max(ai_scores)
             if ai_max > ai_min:
                 ai_normalized = ((ai_score - ai_min) / (ai_max - ai_min)) * 100
             else:
                 ai_normalized = 50
-            final_score = (match_percentage * 0.7) + (ai_normalized * 0.3)
+            final_score = (match_percentage * 0.6) + (ai_normalized * 0.4)
         else:
-            # If AI model isn't working, use rule-based score
             final_score = match_percentage
         
         results.append({
@@ -288,13 +252,16 @@ def get_recommendations(df, model, preferences, n=5):
     # Get top N
     top_results = results[:n]
     
-    # Create DataFrame with results
-    recommendations = pd.DataFrame([r['hostel'] for r in top_results]).reset_index(drop=True)
-    recommendations['Match Score'] = [r['match_percentage'] for r in top_results]
-    recommendations['AI Score'] = [r['ai_score'] for r in top_results]
-    recommendations['Final Score'] = [r['final_score'] for r in top_results]
+    # Create recommendations list
+    recommendations = []
+    for r in top_results:
+        hostel_data = r['hostel'].to_dict()
+        hostel_data['Match Score'] = round(r['match_percentage'], 1)
+        hostel_data['AI Score'] = round(r['ai_score'], 1)
+        hostel_data['Final Score'] = round(r['final_score'], 1)
+        recommendations.append(hostel_data)
     
-    return recommendations
+    return pd.DataFrame(recommendations)
 
 # ---------------------------------------
 # CHATBOT CLASS
