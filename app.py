@@ -432,7 +432,9 @@ def get_recommendations(df, model, preferences, n=5):
         try:
             ai_scores = []
             for _, row in filtered.iterrows():
-                input_df = pd.DataFrame([{
+                # Prepare input with all required columns
+                input_data = {
+                    "Hostel": [row.get('Hostel', 'Unknown')],
                     "Budget (UGX/sem)": [row['Budget (UGX/sem)']],
                     "Gender": [row['Gender']],
                     "Distance (km)": [row['Distance (km)']],
@@ -442,7 +444,10 @@ def get_recommendations(df, model, preferences, n=5):
                     "Room Type": [row['Room Type']],
                     "Bathroom": [row['Bathroom']],
                     "Kitchen": [row['Kitchen']]
-                }])
+                }
+                input_df = pd.DataFrame(input_data)
+                
+                # Predict
                 score = model.predict(input_df)[0]
                 ai_scores.append(score)
             
@@ -450,6 +455,7 @@ def get_recommendations(df, model, preferences, n=5):
             
         except Exception as e:
             st.warning(f"Model prediction warning: {str(e)}")
+            # Fallback: use budget similarity
             filtered['AI_Score'] = 1 - abs(filtered['Budget (UGX/sem)'] - preferences['budget']) / 1000000
     
     # Calculate match scores
