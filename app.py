@@ -33,27 +33,45 @@ st.markdown("""
     box-shadow: 0 2px 8px rgba(0,0,0,0.1);
     margin-bottom: 20px;
 }
-.message {
-    padding: 12px 16px;
-    border-radius: 12px;
-    margin: 8px 0;
-    max-width: 80%;
+.chat-message {
+    display: flex;
+    margin-bottom: 10px;
 }
 .user-message {
-    background: #003366;
-    color: white;
-    margin-left: auto;
-    text-align: right;
+    justify-content: flex-end;
 }
 .bot-message {
+    justify-content: flex-start;
+}
+.message-bubble {
+    max-width: 70%;
+    padding: 12px 16px;
+    border-radius: 12px;
+    position: relative;
+    word-wrap: break-word;
+}
+.user-bubble {
+    background: #003366;
+    color: white;
+    border-bottom-right-radius: 4px;
+}
+.bot-bubble {
     background: #e8edf5;
     color: #003366;
-    margin-right: auto;
+    border-bottom-left-radius: 4px;
 }
 .timestamp {
     font-size: 10px;
     color: #999;
     margin-top: 4px;
+}
+.user-timestamp {
+    text-align: right;
+    color: #ccc;
+}
+.bot-timestamp {
+    text-align: left;
+    color: #999;
 }
 .card {
     background: white;
@@ -82,22 +100,6 @@ st.markdown("""
     height: 100%;
     background: linear-gradient(90deg, #28a745, #003366);
     border-radius: 3px;
-}
-.suggestion-chip {
-    background: #e3f2fd;
-    padding: 8px 16px;
-    border-radius: 20px;
-    cursor: pointer;
-    display: inline-block;
-    margin: 4px;
-    font-size: 14px;
-    text-align: center;
-    width: 100%;
-    border: none;
-}
-.suggestion-chip:hover {
-    background: #003366;
-    color: white;
 }
 </style>
 """, unsafe_allow_html=True)
@@ -145,7 +147,7 @@ def load_model():
         return None
 
 # ---------------------------------------
-# HELPER FUNCTIONS - MATCHING ORIGINAL MODEL
+# HELPER FUNCTIONS
 # ---------------------------------------
 def get_match_scores(hostel, preferences):
     """Calculate match scores for a hostel"""
@@ -193,8 +195,7 @@ def get_match_scores(hostel, preferences):
     return scores
 
 def get_recommendations(df, model, preferences, n=5):
-    """Get recommendations using the trained model - SAME AS ORIGINAL APP"""
-    # Start with all data
+    """Get recommendations using the trained model"""
     filtered = df.copy()
     
     # Apply basic filters
@@ -216,7 +217,6 @@ def get_recommendations(df, model, preferences, n=5):
         try:
             ai_scores = []
             for _, row in filtered.iterrows():
-                # Prepare input exactly like original app
                 input_data = {
                     "Hostel": [row['Hostel']],
                     "Budget (UGX/sem)": [row['Budget (UGX/sem)']],
@@ -230,17 +230,13 @@ def get_recommendations(df, model, preferences, n=5):
                     "Kitchen": [row['Kitchen']]
                 }
                 input_df = pd.DataFrame(input_data)
-                
-                # Predict using model
                 score = model.predict(input_df)[0]
                 ai_scores.append(score)
             
             filtered['AI_Score'] = ai_scores
             
         except Exception as e:
-            st.warning(f"Model prediction issue: {str(e)}")
-            # Fallback
-            filtered['AI_Score'] = 3.0  # Default score
+            filtered['AI_Score'] = 3.0
     
     # Calculate match scores
     match_scores = []
@@ -251,9 +247,8 @@ def get_recommendations(df, model, preferences, n=5):
     match_df = pd.DataFrame(match_scores)
     filtered = pd.concat([filtered.reset_index(drop=True), match_df], axis=1)
     
-    # Calculate final score - SAME AS ORIGINAL APP
+    # Calculate final score
     if 'AI_Score' in filtered.columns:
-        # Normalize AI score
         ai_max = filtered['AI_Score'].max()
         ai_min = filtered['AI_Score'].min()
         if ai_max > ai_min:
@@ -261,7 +256,6 @@ def get_recommendations(df, model, preferences, n=5):
         else:
             filtered['AI_Percentage'] = 50
         
-        # Final score: 60% AI, 40% match
         filtered['Final_Score'] = (
             filtered['AI_Percentage'] * 0.6 + 
             filtered['Overall'] * 0.4
@@ -269,7 +263,6 @@ def get_recommendations(df, model, preferences, n=5):
     else:
         filtered['Final_Score'] = filtered['Overall']
     
-    # Sort by final score
     filtered = filtered.sort_values('Final_Score', ascending=False)
     
     return filtered.head(n)
@@ -342,7 +335,6 @@ class HostelChatbot:
         text_lower = text.lower()
         
         if key == 'budget':
-            # Extract budget
             patterns = [
                 r'(\d+)\s*(?:thousand|k)',
                 r'(?:ugx|shs)\s*(\d+)',
@@ -362,7 +354,6 @@ class HostelChatbot:
                     except:
                         pass
             
-            # Try direct number
             numbers = re.findall(r'\d+', text)
             if numbers:
                 try:
@@ -398,7 +389,6 @@ class HostelChatbot:
                     except:
                         pass
             
-            # Try direct number
             numbers = re.findall(r'\d+\.?\d*', text)
             if numbers:
                 try:
@@ -475,7 +465,6 @@ class HostelChatbot:
         if recommendations is None or len(recommendations) == 0:
             return "I couldn't find any hostels matching your preferences. Let's start over."
         
-        # Get AI score for top hostel
         top_hostel = recommendations.iloc[0]
         
         if self.model is not None and 'AI_Score' in top_hostel:
@@ -483,7 +472,6 @@ class HostelChatbot:
         else:
             ai_score = top_hostel.get('Final_Score', 3) * 5 / 20
         
-        # Build message
         message = f"✅ **Great! Based on your preferences, here are my recommendations:**\n\n"
         message += f"🏆 **Top Pick: {top_hostel['Hostel']}**\n"
         message += f"   • AI Score: {ai_score:.1f}/5\n"
@@ -503,7 +491,7 @@ class HostelChatbot:
                 alt_score = hostel.get('AI_Score', 3)
                 message += f"• {hostel['Hostel']} (Score: {alt_score:.1f}/5, UGX {int(hostel['Budget (UGX/sem)']):,})\n"
         
-        message += "\nYou can click 'Show Recommendations' below to see detailed cards or click 'Start Over' to try different preferences."
+        message += "\nClick 'Show Recommendations' below to see detailed cards or 'Start Over' to try different preferences."
         
         return message
 
@@ -527,162 +515,143 @@ def main():
         st.session_state.show_recommendations = False
         
         # Add welcome message
-        welcome = "👋 Hello! I'm your hostel assistant. I'll help you find the perfect hostel at Lira University.\n\nI'll ask you a few questions about your preferences and then recommend the best hostels for you.\n\nLet's start! What is your budget per semester in UGX? (e.g., 300000)"
+        welcome = "Hello! I'm your hostel assistant. I'll help you find the perfect hostel at Lira University.\n\nI'll ask you a few questions about your preferences and then recommend the best hostels for you.\n\nLet's start! What is your budget per semester in UGX? (e.g., 300000)"
         st.session_state.messages.append({"role": "assistant", "content": welcome})
     
     # Title
     st.title("Hostel AI Assistant")
     st.write("Chat with me to find your ideal hostel at Lira University")
     
-    # Chat interface
-    chat_container = st.container()
+    # Display chat messages using st.chat_message
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.write(msg["content"])
     
-    with chat_container:
-        # Display chat messages
-        chat_html = '<div class="chat-container">'
-        for msg in st.session_state.messages:
-            if msg["role"] == "user":
-                chat_html += f"""
-                <div class="message user-message">
-                    {msg["content"]}
-                    <div class="timestamp">{datetime.now().strftime("%I:%M %p")}</div>
-                </div>
-                """
-            else:
-                chat_html += f"""
-                <div class="message bot-message">
-                    {msg["content"]}
-                    <div class="timestamp">{datetime.now().strftime("%I:%M %p")}</div>
-                </div>
-                """
-        chat_html += '</div>'
-        st.markdown(chat_html, unsafe_allow_html=True)
+    # Show recommendations if available
+    if st.session_state.show_recommendations and st.session_state.recommendations is not None:
+        st.markdown("---")
+        st.subheader("Top Recommendations")
         
-        # Show recommendations if available
-        if st.session_state.show_recommendations and st.session_state.recommendations is not None:
+        recommendations = st.session_state.recommendations
+        
+        # Display top 3 as cards
+        for i in range(min(3, len(recommendations))):
+            hostel = recommendations.iloc[i]
+            if i == 0:
+                st.success("🏆 Best Match")
+            
+            ai_score = hostel.get('AI_Score', 3)
+            
+            st.markdown(f"""
+            <div class="card">
+                <h3 style="color: #003366; margin: 0;">{hostel['Hostel']}</h3>
+                <p><strong>AI Score:</strong> {ai_score:.1f}/5</p>
+                <div class="score-bar">
+                    <div class="score-bar-fill" style="width: {ai_score/5*100:.1f}%;"></div>
+                </div>
+                <p><strong>Budget:</strong> UGX {int(hostel['Budget (UGX/sem)']):,} | <strong>Distance:</strong> {hostel['Distance (km)']} km</p>
+                <div style="margin: 10px 0;">
+                    <span class="badge">WiFi: {hostel['WiFi']}</span>
+                    <span class="badge">Water: {hostel['Water']}</span>
+                    <span class="badge">Security: {hostel['Security']}</span>
+                    <span class="badge">Room: {hostel['Room Type']}</span>
+                    <span class="badge">Bathroom: {hostel['Bathroom']}</span>
+                    <span class="badge">Kitchen: {hostel['Kitchen']}</span>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        
+        # Action buttons
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("Start Over", use_container_width=True):
+                st.session_state.chatbot.reset()
+                st.session_state.messages = []
+                st.session_state.recommendations = None
+                st.session_state.show_recommendations = False
+                welcome = "Let's start over! What is your budget per semester in UGX? (e.g., 300000)"
+                st.session_state.messages.append({"role": "assistant", "content": welcome})
+                st.rerun()
+        
+        with col2:
+            if st.button("Show All Hostels", use_container_width=True):
+                st.session_state.show_all = True
+        
+        # Show all hostels if requested
+        if 'show_all' in st.session_state and st.session_state.show_all:
             st.markdown("---")
-            st.subheader("Top Recommendations")
-            
-            recommendations = st.session_state.recommendations
-            
-            # Display top 3 as cards
-            for i in range(min(3, len(recommendations))):
-                hostel = recommendations.iloc[i]
-                if i == 0:
-                    st.success("🏆 Best Match")
-                
-                ai_score = hostel.get('AI_Score', 3)
-                
-                st.markdown(f"""
-                <div class="card">
-                    <h3 style="color: #003366; margin: 0;">{hostel['Hostel']}</h3>
-                    <p><strong>AI Score:</strong> {ai_score:.1f}/5</p>
-                    <div class="score-bar">
-                        <div class="score-bar-fill" style="width: {ai_score/5*100:.1f}%;"></div>
-                    </div>
-                    <p><strong>Budget:</strong> UGX {int(hostel['Budget (UGX/sem)']):,} | <strong>Distance:</strong> {hostel['Distance (km)']} km</p>
-                    <div style="margin: 10px 0;">
-                        <span class="badge">WiFi: {hostel['WiFi']}</span>
-                        <span class="badge">Water: {hostel['Water']}</span>
-                        <span class="badge">Security: {hostel['Security']}</span>
-                        <span class="badge">Room: {hostel['Room Type']}</span>
-                        <span class="badge">Bathroom: {hostel['Bathroom']}</span>
-                        <span class="badge">Kitchen: {hostel['Kitchen']}</span>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-            
-            # Action buttons
-            col1, col2 = st.columns(2)
-            with col1:
-                if st.button("🔄 Start Over", use_container_width=True):
-                    st.session_state.chatbot.reset()
-                    st.session_state.messages = []
-                    st.session_state.recommendations = None
-                    st.session_state.show_recommendations = False
-                    welcome = "👋 Let's start over! What is your budget per semester in UGX? (e.g., 300000)"
-                    st.session_state.messages.append({"role": "assistant", "content": welcome})
-                    st.rerun()
-            
-            with col2:
-                if st.button("📋 Show All Hostels", use_container_width=True):
-                    st.session_state.show_all = True
-            
-            # Show all hostels if requested
-            if 'show_all' in st.session_state and st.session_state.show_all:
-                st.markdown("---")
-                st.subheader("All Available Hostels")
-                st.dataframe(
-                    df,
-                    use_container_width=True,
-                    hide_index=True,
-                    column_config={
-                        "Budget (UGX/sem)": st.column_config.NumberColumn("Budget (UGX)", format="UGX %d")
-                    }
-                )
-                if st.button("Hide All Hostels"):
-                    st.session_state.show_all = False
-                    st.rerun()
+            st.subheader("All Available Hostels")
+            st.dataframe(
+                df,
+                use_container_width=True,
+                hide_index=True,
+                column_config={
+                    "Budget (UGX/sem)": st.column_config.NumberColumn("Budget (UGX)", format="UGX %d")
+                }
+            )
+            if st.button("Hide All Hostels"):
+                st.session_state.show_all = False
+                st.rerun()
+    
+    # Chat input - only show if not complete
+    if not st.session_state.show_recommendations:
+        user_input = st.chat_input("Type your response here...")
         
-        # Chat input - only show if not complete
-        if not st.session_state.show_recommendations:
-            user_input = st.chat_input("Type your response here...")
+        if user_input:
+            # Add user message
+            st.session_state.messages.append({"role": "user", "content": user_input})
             
-            if user_input:
-                # Add user message
-                st.session_state.messages.append({"role": "user", "content": user_input})
+            # Process with chatbot
+            chatbot = st.session_state.chatbot
+            
+            if not chatbot.complete:
+                # Process response
+                response = chatbot.process_response(user_input)
                 
-                # Process with chatbot
-                chatbot = st.session_state.chatbot
-                
-                if not chatbot.complete:
-                    # Process response
-                    response = chatbot.process_response(user_input)
-                    
-                    if response is not None:
-                        # Check if response is a recommendation (dict)
-                        if isinstance(response, pd.DataFrame):
-                            st.session_state.recommendations = response
-                            st.session_state.show_recommendations = True
-                            
-                            # Format recommendation message
-                            bot_message = chatbot.format_recommendation_message(response)
-                            st.session_state.messages.append({"role": "assistant", "content": bot_message})
-                        else:
-                            # It's a question
-                            st.session_state.messages.append({"role": "assistant", "content": response})
+                if response is not None:
+                    # Check if response is a recommendation (DataFrame)
+                    if isinstance(response, pd.DataFrame):
+                        st.session_state.recommendations = response
+                        st.session_state.show_recommendations = True
+                        
+                        # Format recommendation message
+                        bot_message = chatbot.format_recommendation_message(response)
+                        st.session_state.messages.append({"role": "assistant", "content": bot_message})
                     else:
-                        st.session_state.messages.append({"role": "assistant", "content": "I'm sorry, I didn't understand. Can you please rephrase?"})
-                    
-                    st.rerun()
+                        # It's a question
+                        st.session_state.messages.append({"role": "assistant", "content": response})
+                else:
+                    st.session_state.messages.append({"role": "assistant", "content": "I'm sorry, I didn't understand. Can you please rephrase?"})
+                
+                st.rerun()
+    
+    # Sidebar
+    with st.sidebar:
+        st.header("Current Preferences")
         
-        # Show current preferences in sidebar
-        with st.sidebar:
-            st.header("Current Preferences")
-            
-            if st.session_state.chatbot.preferences:
-                prefs = st.session_state.chatbot.preferences
-                st.write(f"**Budget:** UGX {prefs.get('budget', 'Not set'):,}" if 'budget' in prefs else "**Budget:** Not set")
-                st.write(f"**Gender:** {prefs.get('gender', 'Not set')}")
-                st.write(f"**Distance:** {prefs.get('distance', 'Not set')} km")
-                st.write(f"**WiFi:** {prefs.get('wifi', 'Not set')}")
-                st.write(f"**Water:** {prefs.get('water', 'Not set')}")
-                st.write(f"**Security:** {prefs.get('security', 'Not set')}")
-                st.write(f"**Room Type:** {prefs.get('room_type', 'Not set')}")
-                st.write(f"**Bathroom:** {prefs.get('bathroom', 'Not set')}")
-                st.write(f"**Kitchen:** {prefs.get('kitchen', 'Not set')}")
-            else:
-                st.write("No preferences set yet")
-            
-            st.markdown("---")
-            st.markdown("""
-            **How to use:**
-            1. Answer each question
-            2. I'll collect your preferences
-            3. Get AI-powered recommendations
-            4. View detailed hostel cards
-            5. Start over anytime
-            """)
+        if st.session_state.chatbot.preferences:
+            prefs = st.session_state.chatbot.preferences
+            st.write(f"**Budget:** UGX {prefs.get('budget', 'Not set'):,}" if 'budget' in prefs else "**Budget:** Not set")
+            st.write(f"**Gender:** {prefs.get('gender', 'Not set')}")
+            st.write(f"**Distance:** {prefs.get('distance', 'Not set')} km")
+            st.write(f"**WiFi:** {prefs.get('wifi', 'Not set')}")
+            st.write(f"**Water:** {prefs.get('water', 'Not set')}")
+            st.write(f"**Security:** {prefs.get('security', 'Not set')}")
+            st.write(f"**Room Type:** {prefs.get('room_type', 'Not set')}")
+            st.write(f"**Bathroom:** {prefs.get('bathroom', 'Not set')}")
+            st.write(f"**Kitchen:** {prefs.get('kitchen', 'Not set')}")
+        else:
+            st.write("No preferences set yet")
+        
+        st.markdown("---")
+        st.markdown("""
+        **How to use:**
+        1. Answer each question
+        2. I'll collect your preferences
+        3. Get AI-powered recommendations
+        4. View detailed hostel cards
+        5. Start over anytime
+        """)
 
 # ---------------------------------------
 # FOOTER
