@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import joblib
+from nlp_engine import extract_preferences
 
 # ---------------------------------------
 # PAGE CONFIG
@@ -154,6 +155,48 @@ kitchen = st.sidebar.selectbox(
         "Shared"
     ]
 )
+# ---------------------------------------
+# AI CHAT ASSISTANT
+# ---------------------------------------
+
+st.divider()
+
+st.subheader("🤖 Chat With Hostel AI")
+
+st.write(
+    "Describe your ideal hostel and AI will understand your preferences."
+)
+
+
+user_message = st.text_area(
+    "Example: I am a female student looking for a hostel near campus with WiFi, private bathroom and a budget of 350000"
+)
+
+
+if st.button("Find Hostel Using AI"):
+
+    if user_message.strip() == "":
+
+        st.warning(
+            "Please describe the hostel you are looking for."
+        )
+
+    else:
+
+        preferences = extract_preferences(
+            user_message
+        )
+
+
+        st.success(
+            "AI understood your requirements:"
+        )
+
+
+        st.json(
+            preferences
+        )
+
 
 # ---------------------------------------
 # PREDICT
