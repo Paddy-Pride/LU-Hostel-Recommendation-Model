@@ -1,121 +1,32 @@
-import streamlit as st
 import pandas as pd
 import numpy as np
+from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.pipeline import Pipeline
+from sklearn.compose import ColumnTransformer
+from sklearn.impute import SimpleImputer
 import joblib
-from sklearn.preprocessing import LabelEncoder
-from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.feature_extraction.text import TfidfVectorizer
-import plotly.express as px
-import plotly.graph_objects as go
-from datetime import datetime
 import warnings
 warnings.filterwarnings('ignore')
 
-# ---------------------------------------
-# PAGE CONFIG
-# ---------------------------------------
-st.set_page_config(
-    page_title="Lira University Hostel AI - Smart Recommendation System",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
-
-# ---------------------------------------
-# CUSTOM CSS
-# ---------------------------------------
-st.markdown("""
-<style>
-    .main {
-        background: linear-gradient(135deg, #f5f7fa 0%, #e8edf5 100%);
-    }
-    .block-container {
-        padding-top: 2rem;
-        padding-bottom: 2rem;
-    }
-    h1 {
-        color: #003366;
-        font-weight: 700;
-    }
-    .card {
-        background: white;
-        padding: 25px;
-        border-radius: 15px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.08);
-        transition: transform 0.3s ease;
-        border-left: 5px solid #003366;
-        margin-bottom: 20px;
-    }
-    .card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 25px rgba(0,0,0,0.12);
-    }
-    .metric-card {
-        background: white;
-        padding: 20px;
-        border-radius: 12px;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.05);
-        text-align: center;
-    }
-    .footer {
-        text-align: center;
-        color: #666;
-        padding: 30px;
-        font-size: 14px;
-        border-top: 1px solid #e0e0e0;
-        margin-top: 30px;
-    }
-    .badge {
-        background: #003366;
-        color: white;
-        padding: 4px 12px;
-        border-radius: 20px;
-        font-size: 12px;
-        display: inline-block;
-    }
-    .stButton > button {
-        background: #003366;
-        color: white;
-        border: none;
-        padding: 10px 30px;
-        border-radius: 25px;
-        font-weight: 600;
-        transition: all 0.3s ease;
-        width: 100%;
-    }
-    .stButton > button:hover {
-        background: #004d99;
-        transform: scale(1.02);
-        box-shadow: 0 4px 15px rgba(0,51,102,0.3);
-    }
-    .stSidebar .sidebar-content {
-        background: #f8f9fc;
-    }
-    .match-high {
-        color: #28a745;
-        font-weight: bold;
-    }
-    .match-medium {
-        color: #ffc107;
-        font-weight: bold;
-    }
-    .match-low {
-        color: #dc3545;
-        font-weight: bold;
-    }
-</style>
-""", unsafe_allow_html=True)
-
-# ---------------------------------------
-# CACHE DATA LOADING
-# ---------------------------------------
-@st.cache_data
-def load_data():
-    """Load and preprocess the dataset with caching"""
-    try:
-        df = pd.read_excel("Lira_University_Hostel_Dataset.xlsx")
+class HostelAI:
+    def __init__(self):
+        self.model = None
+        self.preprocessor = None
+        self.feature_columns = None
+        self.label_encoders = {}
+        self.scaler = None
+        self.best_params = {}
         
-        # Clean budget column
+    def load_and_prepare_data(self, filepath="Lira_University_Hostel_Dataset.xlsx"):
+        """Load and prepare data with advanced preprocessing"""
+        # Load data
+        df = pd.read_excel(filepath)
+        
+        # Clean budget
         df["Budget (UGX/sem)"] = (
             df["Budget (UGX/sem)"]
             .astype(str)
@@ -131,488 +42,469 @@ def load_data():
         df["Security"] = df["Security"].fillna("Basic")
         
         return df
-    except Exception as e:
-        st.error(f"Error loading data: {str(e)}")
-        return None
-
-@st.cache_resource
-def load_model():
-    """Load the trained model"""
-    try:
-        return joblib.load("hostel_ai_model.pkl")
-    except:
-        return None
-
-# ---------------------------------------
-# AI ENHANCEMENTS - Advanced Recommendation Engine
-# ---------------------------------------
-class AdvancedHostelRecommender:
-    def __init__(self, df):
-        self.df = df
-        self.feature_columns = ['Budget (UGX/sem)', 'Distance (km)']
-        self.categorical_columns = ['Gender', 'WiFi', 'Water', 'Security', 'Room Type', 'Bathroom', 'Kitchen']
-        self.label_encoders = {}
-        self.vectorizer = None
-        self._prepare_features()
     
-    def _prepare_features(self):
-        """Prepare feature matrix for similarity calculations"""
-        # Encode categorical features
-        for col in self.categorical_columns:
-            if col in self.df.columns:
-                le = LabelEncoder()
-                self.df[f'{col}_encoded'] = le.fit_transform(self.df[col].astype(str))
-                self.label_encoders[col] = le
+    def engineer_features(self, df):
+        """Create advanced features for better model performance"""
+        df = df.copy()
         
-        # Create TF-IDF features for text matching
-        text_features = self.df[self.categorical_columns].astype(str).agg(' '.join, axis=1)
-        self.vectorizer = TfidfVectorizer(max_features=50)
-        self.text_features = self.vectorizer.fit_transform(text_features)
+        # 1. Budget efficiency (budget per room type)
+        room_budget_map = {
+            'Single': df[df['Room Type'] == 'Single']['Budget (UGX/sem)'].mean(),
+            'Double': df[df['Room Type'] == 'Double']['Budget (UGX/sem)'].mean(),
+            'Triple': df[df['Room Type'] == 'Triple']['Budget (UGX/sem)'].mean(),
+            'Quad': df[df['Room Type'] == 'Quad']['Budget (UGX/sem)'].mean()
+        }
+        df['Budget_Efficiency'] = df['Budget (UGX/sem)'] / df['Room Type'].map(room_budget_map)
         
-        # Normalize numerical features
-        self.numeric_features = self.df[self.feature_columns].copy()
-        self.numeric_features['Budget (UGX/sem)'] = (
-            self.numeric_features['Budget (UGX/sem)'] - self.numeric_features['Budget (UGX/sem)'].mean()
-        ) / self.numeric_features['Budget (UGX/sem)'].std()
-        self.numeric_features['Distance (km)'] = (
-            self.numeric_features['Distance (km)'] - self.numeric_features['Distance (km)'].mean()
-        ) / self.numeric_features['Distance (km)'].std()
+        # 2. Comfort score (combination of amenities)
+        comfort_factors = {
+            'WiFi': {'Yes': 1, 'No': 0},
+            'Bathroom': {'Private': 1, 'Shared': 0},
+            'Kitchen': {'Private': 1, 'Shared': 0}
+        }
         
-        # Combine all features
-        self.feature_matrix = np.hstack([
-            self.numeric_features.values,
-            self.df[[f'{col}_encoded' for col in self.categorical_columns if f'{col}_encoded' in self.df.columns]].values,
-            self.text_features.toarray()
-        ])
+        comfort_score = 0
+        for factor, mapping in comfort_factors.items():
+            if factor in df.columns:
+                comfort_score += df[factor].map(mapping)
+        df['Comfort_Score'] = comfort_score / len(comfort_factors)
+        
+        # 3. Security index
+        security_map = {
+            '24/7 Guard + CCTV': 4,
+            'Security Guard': 3,
+            'Gated Only': 2,
+            'Basic': 1
+        }
+        df['Security_Index'] = df['Security'].map(security_map)
+        
+        # 4. Water reliability
+        water_map = {
+            'Always Available': 3,
+            'Sometimes Interrupted': 2,
+            'Irregular': 1
+        }
+        df['Water_Reliability'] = df['Water'].map(water_map)
+        
+        # 5. Distance score (inverse of distance)
+        df['Distance_Score'] = 1 / (df['Distance (km)'] + 0.1)
+        
+        # 6. Value for money (budget / combined features)
+        df['Value_Score'] = (
+            df['Comfort_Score'] + 
+            (df['Security_Index'] / 4) + 
+            (df['Water_Reliability'] / 3)
+        ) / (df['Budget (UGX/sem)'] / 100000)
+        
+        return df
     
-    def get_recommendations(self, preferences, n_recommendations=5):
-        """Get top N hostel recommendations based on preferences"""
-        # Encode user preferences
-        preference_vector = []
+    def prepare_features(self, df):
+        """Prepare features for model training"""
+        # Select features
+        feature_cols = [
+            'Budget (UGX/sem)',
+            'Distance (km)',
+            'Gender',
+            'WiFi',
+            'Water',
+            'Security',
+            'Room Type',
+            'Bathroom',
+            'Kitchen',
+            'Budget_Efficiency',
+            'Comfort_Score',
+            'Security_Index',
+            'Water_Reliability',
+            'Distance_Score',
+            'Value_Score'
+        ]
         
-        # Numerical features
-        budget_norm = (preferences['budget'] - self.df['Budget (UGX/sem)'].mean()) / self.df['Budget (UGX/sem)'].std()
-        distance_norm = (preferences['distance'] - self.df['Distance (km)'].mean()) / self.df['Distance (km)'].std()
-        preference_vector.extend([budget_norm, distance_norm])
+        # Use only available columns
+        self.feature_columns = [col for col in feature_cols if col in df.columns]
         
-        # Categorical features
-        for col in self.categorical_columns:
-            if col in preferences:
-                try:
-                    encoded = self.label_encoders[col].transform([preferences[col]])[0]
-                    preference_vector.append(encoded)
-                except:
-                    preference_vector.append(0)
+        # Separate features and target (using target as recommendation score)
+        # Generate recommendation score based on features
+        X = df[self.feature_columns].copy()
         
-        # Text features
-        user_text = ' '.join([str(preferences.get(col, '')) for col in self.categorical_columns if col in preferences])
-        user_text_features = self.vectorizer.transform([user_text]).toarray()
-        preference_vector.extend(user_text_features[0])
-        
-        preference_vector = np.array(preference_vector).reshape(1, -1)
-        
-        # Calculate similarities
-        similarities = cosine_similarity(preference_vector, self.feature_matrix)[0]
-        
-        # Get top N recommendations
-        top_indices = np.argsort(similarities)[::-1][:n_recommendations]
-        
-        recommendations = self.df.iloc[top_indices].copy()
-        recommendations['Similarity Score'] = similarities[top_indices]
-        
-        # Calculate additional metrics
-        budget_diff = abs(recommendations['Budget (UGX/sem)'] - preferences['budget'])
-        recommendations['Budget Compatibility'] = 1 - (budget_diff / budget_diff.max()) if budget_diff.max() > 0 else 1
-        recommendations['Overall Score'] = (
-            recommendations['Similarity Score'] * 0.6 + 
-            recommendations['Budget Compatibility'] * 0.4
+        # Create target variable (synthetic recommendation score)
+        # Higher score = better hostel
+        y = (
+            (X['Comfort_Score'] if 'Comfort_Score' in X else 0) * 3 +
+            (X['Security_Index'] if 'Security_Index' in X else 0) * 2 +
+            (X['Water_Reliability'] if 'Water_Reliability' in X else 0) * 1.5 +
+            (X['Distance_Score'] if 'Distance_Score' in X else 0) * 2 +
+            (X['Value_Score'] if 'Value_Score' in X else 0) * 2
         )
         
-        return recommendations.sort_values('Overall Score', ascending=False)
+        # Normalize to 1-5 scale
+        y = (y - y.min()) / (y.max() - y.min()) * 4 + 1
+        
+        return X, y
+    
+    def create_preprocessor(self):
+        """Create preprocessing pipeline"""
+        # Define columns by type
+        numerical_cols = [
+            'Budget (UGX/sem)', 'Distance (km)',
+            'Budget_Efficiency', 'Comfort_Score', 
+            'Security_Index', 'Water_Reliability', 
+            'Distance_Score', 'Value_Score'
+        ]
+        categorical_cols = [
+            'Gender', 'WiFi', 'Water', 'Security', 
+            'Room Type', 'Bathroom', 'Kitchen'
+        ]
+        
+        # Filter to available columns
+        numerical_cols = [col for col in numerical_cols if col in self.feature_columns]
+        categorical_cols = [col for col in categorical_cols if col in self.feature_columns]
+        
+        # Preprocessors
+        numerical_transformer = Pipeline(steps=[
+            ('imputer', SimpleImputer(strategy='median')),
+            ('scaler', StandardScaler())
+        ])
+        
+        categorical_transformer = Pipeline(steps=[
+            ('imputer', SimpleImputer(strategy='constant', fill_value='missing')),
+            ('encoder', LabelEncoder())
+        ])
+        
+        # Combined preprocessor
+        preprocessor = ColumnTransformer(
+            transformers=[
+                ('num', numerical_transformer, numerical_cols),
+                ('cat', categorical_transformer, categorical_cols)
+            ])
+        
+        return preprocessor
+    
+    def train_model(self, filepath="Lira_University_Hostel_Dataset.xlsx"):
+        """Train enhanced AI model"""
+        # Load and prepare data
+        df = self.load_and_prepare_data(filepath)
+        df = self.engineer_features(df)
+        
+        # Prepare features and target
+        X, y = self.prepare_features(df)
+        
+        # Split data
+        X_train, X_test, y_train, y_test = train_test_split(
+            X, y, test_size=0.2, random_state=42
+        )
+        
+        # Create preprocessor
+        self.preprocessor = self.create_preprocessor()
+        
+        # Try multiple models
+        models = {
+            'Random Forest': RandomForestRegressor(random_state=42),
+            'Gradient Boosting': GradientBoostingRegressor(random_state=42),
+            'Linear Regression': LinearRegression()
+        }
+        
+        best_model = None
+        best_score = -float('inf')
+        best_model_name = ''
+        
+        for name, model in models.items():
+            # Create pipeline
+            pipeline = Pipeline([
+                ('preprocessor', self.preprocessor),
+                ('regressor', model)
+            ])
+            
+            # Cross validation
+            scores = cross_val_score(pipeline, X_train, y_train, cv=5, scoring='r2')
+            mean_score = scores.mean()
+            
+            if mean_score > best_score:
+                best_score = mean_score
+                best_model = pipeline
+                best_model_name = name
+        
+        # Hyperparameter tuning for best model
+        if best_model_name in ['Random Forest', 'Gradient Boosting']:
+            self.best_params = self.hyperparameter_tuning(
+                X_train, y_train, best_model_name
+            )
+            
+            # Retrain with best parameters
+            if best_model_name == 'Random Forest':
+                model = RandomForestRegressor(**self.best_params, random_state=42)
+            else:
+                model = GradientBoostingRegressor(**self.best_params, random_state=42)
+            
+            self.model = Pipeline([
+                ('preprocessor', self.preprocessor),
+                ('regressor', model)
+            ])
+            self.model.fit(X_train, y_train)
+        else:
+            self.model = best_model
+        
+        # Evaluate
+        y_pred = self.model.predict(X_test)
+        
+        metrics = {
+            'R² Score': r2_score(y_test, y_pred),
+            'MAE': mean_absolute_error(y_test, y_pred),
+            'RMSE': np.sqrt(mean_squared_error(y_test, y_pred)),
+            'Best Model': best_model_name,
+            'Best CV Score': best_score,
+            'Best Params': self.best_params
+        }
+        
+        print("Model Training Complete!")
+        print("=" * 50)
+        for key, value in metrics.items():
+            print(f"{key}: {value}")
+        print("=" * 50)
+        
+        return metrics
+    
+    def hyperparameter_tuning(self, X_train, y_train, model_type):
+        """Perform hyperparameter tuning"""
+        param_grid = {}
+        
+        if model_type == 'Random Forest':
+            param_grid = {
+                'regressor__n_estimators': [50, 100, 200],
+                'regressor__max_depth': [None, 10, 20, 30],
+                'regressor__min_samples_split': [2, 5, 10],
+                'regressor__min_samples_leaf': [1, 2, 4]
+            }
+        elif model_type == 'Gradient Boosting':
+            param_grid = {
+                'regressor__n_estimators': [50, 100, 200],
+                'regressor__learning_rate': [0.01, 0.05, 0.1],
+                'regressor__max_depth': [3, 4, 5],
+                'regressor__min_samples_split': [2, 5]
+            }
+        
+        # Create pipeline with preprocessor
+        pipeline = Pipeline([
+            ('preprocessor', self.preprocessor),
+            ('regressor', RandomForestRegressor(random_state=42))
+        ])
+        
+        # Grid search
+        grid_search = GridSearchCV(
+            pipeline, 
+            param_grid, 
+            cv=5, 
+            scoring='r2',
+            n_jobs=-1,
+            verbose=1
+        )
+        grid_search.fit(X_train, y_train)
+        
+        return grid_search.best_params_
+    
+    def predict(self, user_input):
+        """Predict recommendation score for user"""
+        if self.model is None:
+            raise ValueError("Model not trained! Call train_model() first.")
+        
+        # Ensure input has all required features
+        input_df = pd.DataFrame([user_input])
+        
+        # Add engineered features
+        input_df = self.engineer_features(input_df)
+        
+        # Select only features used in training
+        X_input = input_df[self.feature_columns]
+        
+        # Predict
+        prediction = self.model.predict(X_input)[0]
+        
+        # Clip to 1-5 range
+        return max(1, min(5, prediction))
+    
+    def save_model(self, filepath="hostel_ai_model.pkl"):
+        """Save the trained model"""
+        if self.model is None:
+            raise ValueError("No model to save! Train first.")
+        
+        # Package model with metadata
+        model_package = {
+            'model': self.model,
+            'preprocessor': self.preprocessor,
+            'feature_columns': self.feature_columns,
+            'best_params': self.best_params
+        }
+        
+        joblib.dump(model_package, filepath)
+        print(f"Model saved to {filepath}")
+    
+    def load_model(self, filepath="hostel_ai_model.pkl"):
+        """Load a trained model"""
+        model_package = joblib.load(filepath)
+        self.model = model_package['model']
+        self.preprocessor = model_package['preprocessor']
+        self.feature_columns = model_package['feature_columns']
+        self.best_params = model_package.get('best_params', {})
+        print(f"Model loaded from {filepath}")
 
 # ---------------------------------------
-# MAIN APP
+# ENHANCED TRAINING SCRIPT
 # ---------------------------------------
-def main():
-    # Load data and model
-    df = load_data()
-    if df is None:
-        st.error("Failed to load data. Please check the dataset file.")
-        return
+def train_enhanced_model():
+    """Train and save the enhanced AI model"""
+    print("Starting Enhanced AI Model Training...")
+    print("=" * 60)
     
-    model = load_model()
-    recommender = AdvancedHostelRecommender(df)
+    # Initialize model
+    hostel_ai = HostelAI()
     
-    # Title and description
-    st.title("🏠 Lira University Hostel AI Recommendation System")
-    st.markdown("### Smart Accommodation Matching Powered by Advanced AI")
+    # Train with data
+    metrics = hostel_ai.train_model("Lira_University_Hostel_Dataset.xlsx")
     
+    # Save model
+    hostel_ai.save_model("hostel_ai_model_enhanced.pkl")
+    
+    # Test prediction
+    test_input = {
+        'Budget (UGX/sem)': 350000,
+        'Gender': 'Mixed',
+        'Distance (km)': 0.5,
+        'WiFi': 'Yes',
+        'Water': 'Always Available',
+        'Security': '24/7 Guard + CCTV',
+        'Room Type': 'Single',
+        'Bathroom': 'Private',
+        'Kitchen': 'Private'
+    }
+    
+    score = hostel_ai.predict(test_input)
+    print(f"\nTest Prediction Score: {score:.2f}/5")
+    
+    return hostel_ai, metrics
+
+# ---------------------------------------
+# UPDATED STREAMLIT APP (WITHOUT EMOJIS)
+# ---------------------------------------
+def create_streamlit_app():
+    """Updated Streamlit app that uses the enhanced model"""
+    import streamlit as st
+    
+    st.set_page_config(page_title="Hostel AI", layout="wide")
+    
+    # Custom CSS
     st.markdown("""
-    Discover the perfect hostel that matches your unique preferences using our 
-    **AI-powered recommendation engine**. We analyze multiple factors including budget, 
-    facilities, and location to find your ideal accommodation.
-    """)
+    <style>
+        .main { background: #f5f7fa; }
+        .block-container { padding-top: 2rem; }
+        h1 { color: #003366; }
+        .card {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+    </style>
+    """, unsafe_allow_html=True)
     
-    # Sidebar for user input
-    with st.sidebar:
-        st.header("🎯 Your Preferences")
-        st.markdown("---")
+    # Title
+    st.title("Lira University Hostel AI")
+    st.write("AI-powered hostel recommendation system")
+    
+    # Load enhanced model
+    try:
+        model = HostelAI()
+        model.load_model("hostel_ai_model_enhanced.pkl")
         
-        # Budget input with preset options
-        budget = st.number_input(
-            "💰 Budget (UGX/semester)",
+        # Sidebar inputs
+        st.sidebar.header("Preferences")
+        
+        budget = st.sidebar.number_input(
+            "Budget (UGX/semester)",
             min_value=150000,
             max_value=1000000,
             value=300000,
-            step=10000,
-            help="Your maximum budget per semester"
+            step=10000
         )
         
-        # Quick budget presets
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            if st.button("Low", key="budget_low"):
-                st.session_state.budget = 200000
-        with col2:
-            if st.button("Mid", key="budget_mid"):
-                st.session_state.budget = 350000
-        with col3:
-            if st.button("High", key="budget_high"):
-                st.session_state.budget = 500000
-        
-        if 'budget' in st.session_state:
-            budget = st.session_state.budget
-        
-        gender = st.selectbox(
-            "👤 Gender Preference",
+        gender = st.sidebar.selectbox(
+            "Gender",
             ["Mixed", "Female Only", "Male Only"]
         )
         
-        distance = st.slider(
-            "📏 Maximum Distance (km)",
-            0.1, 5.0, 1.0, 0.1,
-            help="Maximum distance from campus"
+        distance = st.sidebar.slider(
+            "Distance (km)",
+            0.1, 5.0, 1.0
         )
         
-        col1, col2 = st.columns(2)
-        with col1:
-            wifi = st.selectbox("📶 WiFi", ["Yes", "No"])
-            security = st.selectbox(
-                "🔒 Security",
-                ["24/7 Guard + CCTV", "Security Guard", "Gated Only", "Basic"]
-            )
-            bathroom = st.selectbox("🚿 Bathroom", ["Private", "Shared"])
+        wifi = st.sidebar.selectbox("WiFi", ["Yes", "No"])
+        water = st.sidebar.selectbox("Water", ["Always Available", "Sometimes Interrupted", "Irregular"])
+        security = st.sidebar.selectbox("Security", ["24/7 Guard + CCTV", "Security Guard", "Gated Only", "Basic"])
+        room_type = st.sidebar.selectbox("Room Type", ["Single", "Double", "Triple", "Quad"])
+        bathroom = st.sidebar.selectbox("Bathroom", ["Private", "Shared"])
+        kitchen = st.sidebar.selectbox("Kitchen", ["Private", "Shared"])
         
-        with col2:
-            water = st.selectbox(
-                "💧 Water Availability",
-                ["Always Available", "Sometimes Interrupted", "Irregular"]
-            )
-            room = st.selectbox(
-                "🛏️ Room Type",
-                ["Single", "Double", "Triple", "Quad"]
-            )
-            kitchen = st.selectbox("🍳 Kitchen", ["Private", "Shared"])
-        
-        # Advanced options
-        with st.expander("⚙️ Advanced Options"):
-            n_recommendations = st.slider(
-                "Number of recommendations",
-                1, 10, 5
-            )
-            show_similar_hostels = st.checkbox("Show similar hostels", True)
-        
-        # Recommendation button
-        st.markdown("---")
-        recommend_button = st.button(
-            "🔍 Find Best Hostel",
-            use_container_width=True
-        )
-        
-        if st.button("🔄 Reset Preferences", use_container_width=True):
-            st.session_state.clear()
-            st.rerun()
-    
-    # Main content area
-    if recommend_button or 'recommendations' in st.session_state:
-        # Gather preferences
-        preferences = {
-            'budget': budget,
-            'gender': gender,
-            'distance': distance,
-            'wifi': wifi,
-            'water': water,
-            'security': security,
-            'room_type': room,
-            'bathroom': bathroom,
-            'kitchen': kitchen
-        }
-        
-        # Get recommendations
-        recommendations = recommender.get_recommendations(preferences, n_recommendations)
-        st.session_state.recommendations = recommendations
-        
-        # Display recommendations
-        display_recommendations(recommendations, preferences, model, df)
-    
-    else:
-        # Display overview when no recommendations yet
-        display_overview(df)
-    
-    # Footer
-    st.markdown("""
-    <div class='footer'>
-        <strong>Lira University Hostel Recommendation System</strong><br>
-        Powered by Advanced AI | Machine Learning | Smart Matching Algorithms<br>
-        <span style='font-size:12px;'>Last Updated: {}</span>
-    </div>
-    """.format(datetime.now().strftime("%B %d, %Y")), unsafe_allow_html=True)
-
-def display_recommendations(recommendations, preferences, model, df):
-    """Display the AI recommendations with enhanced UI"""
-    
-    # Top recommendation
-    top_hostel = recommendations.iloc[0]
-    
-    # AI-generated score
-    if model is not None:
-        try:
-            input_df = pd.DataFrame([{
-                "Hostel": ["Unknown"],
-                "Budget (UGX/sem)": [preferences['budget']],
-                "Gender": [preferences['gender']],
-                "Distance (km)": [preferences['distance']],
-                "WiFi": [preferences['wifi']],
-                "Water": [preferences['water']],
-                "Security": [preferences['security']],
-                "Room Type": [preferences['room_type']],
-                "Bathroom": [preferences['bathroom']],
-                "Kitchen": [preferences['kitchen']]
-            }])
-            ai_score = model.predict(input_df)[0]
-        except:
-            ai_score = top_hostel['Overall Score'] * 5
-    else:
-        ai_score = top_hostel['Overall Score'] * 5
-    
-    # Display metrics
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.markdown(f"""
-        <div class='metric-card'>
-            <h3 style='color:#003366; margin:0;'>{top_hostel['Hostel']}</h3>
-            <p style='color:#666; margin:5px 0;'>🏆 Top Recommendation</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        st.markdown(f"""
-        <div class='metric-card'>
-            <h2 style='color:#28a745; margin:0;'>{ai_score:.1f}</h2>
-            <p style='color:#666; margin:5px 0;'>⭐ AI Score / 5</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        st.markdown(f"""
-        <div class='metric-card'>
-            <h2 style='color:#003366; margin:0;'>UGX {int(top_hostel['Budget (UGX/sem)']):,}</h2>
-            <p style='color:#666; margin:5px 0;'>💰 Budget</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col4:
-        st.markdown(f"""
-        <div class='metric-card'>
-            <h2 style='color:#003366; margin:0;'>{top_hostel['Distance (km)']} km</h2>
-            <p style='color:#666; margin:5px 0;'>📏 Distance</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # Detailed top recommendation
-    st.markdown("---")
-    col1, col2 = st.columns([2, 1])
-    
-    with col1:
-        st.markdown(f"""
-        <div class='card'>
-            <h3>🏠 {top_hostel['Hostel']}</h3>
-            <p style='color:#666; margin:10px 0;'><strong>Similarity Match:</strong> 
-                <span class='match-high'>{top_hostel['Similarity Score']*100:.1f}%</span>
-            </p>
-            <p style='color:#666; margin:10px 0;'>
-                <strong>Budget:</strong> UGX {int(top_hostel['Budget (UGX/sem)']):,} | 
-                <strong>Distance:</strong> {top_hostel['Distance (km)']} km
-            </p>
-            <div style='display:flex; gap:10px; flex-wrap:wrap; margin:15px 0;'>
-                <span class='badge'>📶 {top_hostel['WiFi']}</span>
-                <span class='badge'>💧 {top_hostel['Water']}</span>
-                <span class='badge'>🔒 {top_hostel['Security']}</span>
-                <span class='badge'>🛏️ {top_hostel['Room Type']}</span>
-                <span class='badge'>🚿 {top_hostel['Bathroom']}</span>
-                <span class='badge'>🍳 {top_hostel['Kitchen']}</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # AI explanation
-        if ai_score >= 4.5:
-            st.success("🌟 **Excellent Match!** This hostel perfectly aligns with your preferences.")
-        elif ai_score >= 3.5:
-            st.info("👍 **Good Match!** This hostel meets most of your criteria.")
-        else:
-            st.warning("⚠️ **Partial Match.** Consider adjusting your preferences for better options.")
-    
-    with col2:
-        # Similarity radar chart
-        categories = ['Budget', 'Facilities', 'Location', 'Security', 'Comfort']
-        values = [
-            top_hostel['Budget Compatibility'] * 100,
-            top_hostel['Similarity Score'] * 100,
-            (1 - top_hostel['Distance (km)'] / 5) * 100,
-            min(100, top_hostel['Similarity Score'] * 120),
-            min(100, top_hostel['Similarity Score'] * 110)
-        ]
-        
-        fig = go.Figure(data=go.Scatterpolar(
-            r=values,
-            theta=categories,
-            fill='toself',
-            line_color='#003366',
-            fillcolor='rgba(0,51,102,0.2)'
-        ))
-        fig.update_layout(
-            polar=dict(
-                radialaxis=dict(
-                    visible=True,
-                    range=[0, 100]
-                )
-            ),
-            showlegend=False,
-            height=250,
-            margin=dict(l=40, r=40, t=20, b=20)
-        )
-        st.plotly_chart(fig, use_container_width=True)
-    
-    # Alternative recommendations
-    if len(recommendations) > 1:
-        st.markdown("---")
-        st.subheader("🔄 Alternative Recommendations")
-        
-        # Show top alternatives in a grid
-        cols = st.columns(min(3, len(recommendations) - 1))
-        for idx, (_, hostel) in enumerate(recommendations.iloc[1:].iterrows()):
-            if idx < 3:
-                with cols[idx]:
-                    st.markdown(f"""
-                    <div class='card' style='padding:15px;'>
-                        <h4 style='color:#003366; margin:0;'>{hostel['Hostel']}</h4>
-                        <p style='margin:5px 0;'>
-                            <strong>Score:</strong> {hostel['Overall Score']*100:.1f}%
-                        </p>
-                        <p style='margin:5px 0; font-size:14px;'>
-                            UGX {int(hostel['Budget (UGX/sem)']):,} • {hostel['Distance (km)']} km
-                        </p>
-                        <div style='margin-top:10px;'>
-                            <span class='badge'>{hostel['Room Type']}</span>
-                            <span class='badge'>{hostel['Bathroom']}</span>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-    
-    # Data exploration
-    with st.expander("📊 Explore All Hostels"):
-        display_data_exploration(df)
-
-def display_overview(df):
-    """Display overview statistics and visualizations"""
-    st.markdown("---")
-    
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown(f"""
-        <div class='metric-card'>
-            <h2 style='margin:0;'>{len(df)}</h2>
-            <p style='color:#666;'>🏠 Available Hostels</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        avg_budget = df['Budget (UGX/sem)'].mean()
-        st.markdown(f"""
-        <div class='metric-card'>
-            <h2 style='margin:0;'>UGX {int(avg_budget):,}</h2>
-            <p style='color:#666;'>💰 Average Budget</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        room_types = df['Room Type'].value_counts().index[0]
-        st.markdown(f"""
-        <div class='metric-card'>
-            <h2 style='margin:0;'>{room_types}</h2>
-            <p style='color:#666;'>🛏️ Most Common Room Type</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    # Quick filters and data preview
-    with st.expander("🔍 Browse Hostels"):
-        # Filters
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            filter_gender = st.selectbox("Filter by Gender", ["All"] + list(df['Gender'].unique()))
-        with col2:
-            filter_room = st.selectbox("Filter by Room Type", ["All"] + list(df['Room Type'].unique()))
-        with col3:
-            filter_wifi = st.selectbox("Filter by WiFi", ["All"] + list(df['WiFi'].unique()))
-        
-        # Apply filters
-        filtered_df = df.copy()
-        if filter_gender != "All":
-            filtered_df = filtered_df[filtered_df['Gender'] == filter_gender]
-        if filter_room != "All":
-            filtered_df = filtered_df[filtered_df['Room Type'] == filter_room]
-        if filter_wifi != "All":
-            filtered_df = filtered_df[filtered_df['WiFi'] == filter_wifi]
-        
-        st.dataframe(
-            filtered_df,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Budget (UGX/sem)": st.column_config.NumberColumn("Budget (UGX)", format="UGX %d")
+        # Predict button
+        if st.sidebar.button("Get Recommendation"):
+            # Prepare input
+            user_input = {
+                'Budget (UGX/sem)': budget,
+                'Gender': gender,
+                'Distance (km)': distance,
+                'WiFi': wifi,
+                'Water': water,
+                'Security': security,
+                'Room Type': room_type,
+                'Bathroom': bathroom,
+                'Kitchen': kitchen
             }
-        )
+            
+            # Get prediction
+            score = model.predict(user_input)
+            
+            # Display results
+            st.markdown('<div class="card">', unsafe_allow_html=True)
+            st.subheader("Recommendation Score")
+            
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                st.markdown(f"<h1 style='text-align: center;'>{score:.2f}</h1>", unsafe_allow_html=True)
+                st.markdown("<p style='text-align: center;'>out of 5.0</p>", unsafe_allow_html=True)
+                
+                # Progress bar
+                st.progress(score / 5)
+                
+                # Rating
+                if score >= 4.0:
+                    st.success("Excellent match for your preferences")
+                elif score >= 3.0:
+                    st.info("Good match for your preferences")
+                else:
+                    st.warning("Consider adjusting your preferences")
+            
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Show feature importance
+            with st.expander("Recommendation Breakdown"):
+                st.write("""
+                **Score Components:**
+                - Budget compatibility
+                - Distance from campus
+                - Security level
+                - Water reliability
+                - Comfort amenities
+                - Overall value
+                """)
+        
+    except Exception as e:
+        st.error(f"Error: {str(e)}")
+        st.info("Please train the model first by running train_enhanced_model()")
 
-def display_data_exploration(df):
-    """Display interactive data exploration visualizations"""
-    # Budget distribution
-    fig1 = px.histogram(
-        df,
-        x='Budget (UGX/sem)',
-        nbins=20,
-        title='Budget Distribution',
-        color_discrete_sequence=['#003366']
-    )
-    fig1.update_layout(height=300)
-    
-    # Room type distribution
-    room_counts = df['Room Type'].value_counts()
-    fig2 = px.pie(
-        values=room_counts.values,
-        names=room_counts.index,
-        title='Room Type Distribution',
-        color_discrete_sequence=px.colors.qualitative.Set3
-    )
-    fig2.update_layout(height=300)
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.plotly_chart(fig1, use_container_width=True)
-    with col2:
-        st.plotly_chart(fig2, use_container_width=True)
-
+# ---------------------------------------
+# MAIN EXECUTION
+# ---------------------------------------
 if __name__ == "__main__":
-    main()
+    # Train enhanced model
+    train_enhanced_model()
+    
+    # Uncomment to run Streamlit app
+    # create_streamlit_app()
