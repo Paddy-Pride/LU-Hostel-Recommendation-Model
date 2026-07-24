@@ -4,14 +4,29 @@ import numpy as np
 import joblib
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.feature_extraction.text import TfidfVectorizer
+import re
+import nltk
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from nltk.stem import WordNetLemmatizer
 import warnings
 warnings.filterwarnings('ignore')
+
+# Download NLTK data (run once)
+try:
+    nltk.data.find('tokenizers/punkt')
+except LookupError:
+    nltk.download('punkt')
+    nltk.download('stopwords')
+    nltk.download('wordnet')
+    nltk.download('omw-1.4')
 
 # ---------------------------------------
 # PAGE CONFIG
 # ---------------------------------------
 st.set_page_config(
-    page_title="Lira University Hostel AI",
+    page_title="Lira University Hostel AI - NLP Enhanced",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -74,8 +89,242 @@ h1 {
     background: linear-gradient(90deg, #28a745, #003366);
     border-radius: 3px;
 }
+.nlp-highlight {
+    background: #e3f2fd;
+    padding: 15px;
+    border-radius: 10px;
+    border-left: 4px solid #003366;
+    margin: 10px 0;
+}
 </style>
 """, unsafe_allow_html=True)
+
+# ---------------------------------------
+# NLP PROCESSING CLASS
+# ---------------------------------------
+class HostelNLP:
+    def __init__(self):
+        self.lemmatizer = WordNetLemmatizer()
+        self.stop_words = set(stopwords.words('english'))
+        self.vectorizer = None
+        self.hostel_descriptions = None
+        self.tfidf_matrix = None
+        
+        # Keywords mapping for better understanding
+        self.keyword_map = {
+            'budget': ['budget', 'cost', 'price', 'affordable', 'cheap', 'expensive', 'money'],
+            'distance': ['distance', 'near', 'close', 'far', 'walking', 'commute'],
+            'security': ['security', 'safe', 'safe', 'guard', 'cctv', 'protected'],
+            'wifi': ['wifi', 'internet', 'network', 'wireless', 'connectivity'],
+            'water': ['water', 'tap', 'supply', 'running water'],
+            'room': ['room', 'single', 'double', 'triple', 'quad', 'spacious'],
+            'bathroom': ['bathroom', 'toilet', 'washroom', 'private', 'shared'],
+            'kitchen': ['kitchen', 'cooking', 'stove', 'fridge', 'prepare food'],
+            'gender': ['gender', 'mixed', 'female', 'male', 'ladies', 'gentlemen']
+        }
+        
+    def preprocess_text(self, text):
+        """Clean and preprocess text for NLP"""
+        if not isinstance(text, str):
+            return ""
+        
+        # Convert to lowercase
+        text = text.lower()
+        
+        # Remove special characters and numbers
+        text = re.sub(r'[^a-zA-Z\s]', '', text)
+        
+        # Tokenize
+        tokens = word_tokenize(text)
+        
+        # Remove stopwords and lemmatize
+        cleaned_tokens = [
+            self.lemmatizer.lemmatize(token) 
+            for token in tokens 
+            if token not in self.stop_words and len(token) > 2
+        ]
+        
+        return ' '.join(cleaned_tokens)
+    
+    def build_corpus(self, df):
+        """Build corpus from hostel features"""
+        descriptions = []
+        
+        for _, row in df.iterrows():
+            desc = []
+            
+            # Create natural language description
+            desc.append(f"hostel {row.get('Hostel', '')}")
+            desc.append(f"budget {row.get('Budget (UGX/sem)', '')}")
+            desc.append(f"distance {row.get('Distance (km)', '')} km")
+            
+            # Add categorical features
+            for col in ['Gender', 'WiFi', 'Water', 'Security', 'Room Type', 'Bathroom', 'Kitchen']:
+                if col in row:
+                    desc.append(str(row[col]).lower())
+            
+            # Add room-specific descriptions
+            room_type = str(row.get('Room Type', '')).lower()
+            if 'single' in room_type:
+                desc.append('private room')
+            elif 'double' in room_type:
+                desc.append('shared room')
+            elif 'triple' in room_type:
+                desc.append('shared large room')
+            
+            # Add security descriptions
+            security = str(row.get('Security', '')).lower()
+            if '24/7' in security or 'cctv' in security:
+                desc.append('high security')
+            elif 'guard' in security:
+                desc.append('secure')
+            
+            # Add water descriptions
+            water = str(row.get('Water', '')).lower()
+            if 'always' in water:
+                desc.append('reliable water')
+            elif 'interrupted' in water:
+                desc.append('unreliable water')
+            
+            descriptions.append(' '.join(desc))
+        
+        self.hostel_descriptions = descriptions
+        return descriptions
+    
+    def fit_vectorizer(self, descriptions):
+        """Fit TF-IDF vectorizer on hostel descriptions"""
+        self.vectorizer = TfidfVectorizer(
+            max_features=100,
+            stop_words='english',
+            ngram_range=(1, 2)
+        )
+        self.tfidf_matrix = self.vectorizer.fit_transform(descriptions)
+        return self.tfidf_matrix
+    
+    def extract_preferences_from_text(self, query):
+        """Extract preferences from natural language query"""
+        preferences = {}
+        cleaned_query = self.preprocess_text(query)
+        
+        # Initialize with defaults
+        preferences = {
+            'budget': 300000,
+            'distance': 1.0,
+            'gender': 'Mixed',
+            'wifi': 'Yes',
+            'water': 'Always Available',
+            'security': '24/7 Guard + CCTV',
+            'room_type': 'Single',
+            'bathroom': 'Private',
+            'kitchen': 'Private'
+        }
+        
+        # Extract budget
+        budget_patterns = [
+            r'(\d+)\s*(?:thousand|k)',
+            r'(?:ugx|shs)\s*(\d+)',
+            r'budget\s*(\d+)'
+        ]
+        for pattern in budget_patterns:
+            match = re.search(pattern, query.lower())
+            if match:
+                try:
+                    budget = int(match.group(1))
+                    if budget < 1000:  # If in thousands
+                        budget = budget * 1000
+                    preferences['budget'] = budget
+                except:
+                    pass
+        
+        # Extract distance
+        distance_patterns = [
+            r'(\d+\.?\d*)\s*km',
+            r'(\d+\.?\d*)\s*kilometer',
+            r'within\s*(\d+\.?\d*)',
+            r'near\s*(\d+\.?\d*)'
+        ]
+        for pattern in distance_patterns:
+            match = re.search(pattern, query.lower())
+            if match:
+                try:
+                    preferences['distance'] = float(match.group(1))
+                except:
+                    pass
+        
+        # Extract gender preference
+        if any(word in query.lower() for word in ['female', 'ladies', 'girls']):
+            preferences['gender'] = 'Female Only'
+        elif any(word in query.lower() for word in ['male', 'gentlemen', 'boys']):
+            preferences['gender'] = 'Male Only'
+        elif any(word in query.lower() for word in ['mixed', 'both']):
+            preferences['gender'] = 'Mixed'
+        
+        # Extract room type
+        room_words = {
+            'single': 'Single',
+            'double': 'Double',
+            'triple': 'Triple',
+            'quad': 'Quad',
+            'shared': 'Double'
+        }
+        for word, room_type in room_words.items():
+            if word in query.lower():
+                preferences['room_type'] = room_type
+                break
+        
+        # Extract bathroom preference
+        if 'private' in query.lower():
+            preferences['bathroom'] = 'Private'
+        elif 'shared' in query.lower():
+            preferences['bathroom'] = 'Shared'
+        
+        # Extract kitchen preference
+        if 'private' in query.lower() and 'kitchen' in query.lower():
+            preferences['kitchen'] = 'Private'
+        elif 'shared' in query.lower() and 'kitchen' in query.lower():
+            preferences['kitchen'] = 'Shared'
+        
+        # Extract WiFi preference
+        if 'wifi' in query.lower() or 'internet' in query.lower():
+            if 'no' in query.lower() and ('wifi' in query.lower() or 'internet' in query.lower()):
+                preferences['wifi'] = 'No'
+            else:
+                preferences['wifi'] = 'Yes'
+        
+        # Extract security preference
+        if '24/7' in query.lower() or 'cctv' in query.lower():
+            preferences['security'] = '24/7 Guard + CCTV'
+        elif 'guard' in query.lower():
+            preferences['security'] = 'Security Guard'
+        elif 'gated' in query.lower():
+            preferences['security'] = 'Gated Only'
+        
+        # Extract water preference
+        if 'always' in query.lower() and 'water' in query.lower():
+            preferences['water'] = 'Always Available'
+        elif 'irregular' in query.lower() and 'water' in query.lower():
+            preferences['water'] = 'Irregular'
+        
+        return preferences
+    
+    def get_semantic_similarity(self, query, top_n=5):
+        """Get semantic similarity between query and hostels"""
+        if self.vectorizer is None or self.tfidf_matrix is None:
+            return None
+        
+        # Preprocess query
+        cleaned_query = self.preprocess_text(query)
+        
+        # Transform query
+        query_vector = self.vectorizer.transform([cleaned_query])
+        
+        # Calculate similarity
+        similarities = cosine_similarity(query_vector, self.tfidf_matrix)[0]
+        
+        # Get top matches
+        top_indices = np.argsort(similarities)[::-1][:top_n]
+        
+        return top_indices, similarities[top_indices]
 
 # ---------------------------------------
 # CACHE DATA LOADING
@@ -119,6 +368,19 @@ def load_model():
         st.warning(f"Model loading warning: {str(e)}")
         return None
 
+@st.cache_resource
+def initialize_nlp():
+    """Initialize NLP processor"""
+    return HostelNLP()
+
+@st.cache_data
+def build_nlp_corpus(df):
+    """Build NLP corpus from data"""
+    nlp = initialize_nlp()
+    descriptions = nlp.build_corpus(df)
+    nlp.fit_vectorizer(descriptions)
+    return nlp
+
 # ---------------------------------------
 # HELPER FUNCTIONS
 # ---------------------------------------
@@ -129,7 +391,7 @@ def get_match_scores(hostel, preferences):
     # 1. Budget match
     if 'Budget (UGX/sem)' in hostel and 'budget' in preferences:
         budget_diff = abs(hostel['Budget (UGX/sem)'] - preferences['budget'])
-        max_budget = 1000000  # Max budget in dataset
+        max_budget = 1000000
         scores['Budget'] = max(0, 100 - (budget_diff / max_budget * 100))
     else:
         scores['Budget'] = 50
@@ -151,7 +413,6 @@ def get_match_scores(hostel, preferences):
     for col in facility_cols:
         if col in hostel and col.lower() in preferences:
             total += 1
-            # Convert both to strings for comparison
             hostel_val = str(hostel[col]).lower()
             pref_val = str(preferences[col.lower()]).lower()
             if hostel_val == pref_val:
@@ -159,7 +420,7 @@ def get_match_scores(hostel, preferences):
     
     scores['Facilities'] = (matches / total * 100) if total > 0 else 50
     
-    # 4. Overall match (weighted average)
+    # 4. Overall match
     scores['Overall'] = (
         scores['Budget'] * 0.30 +
         scores['Distance'] * 0.25 +
@@ -167,6 +428,73 @@ def get_match_scores(hostel, preferences):
     )
     
     return scores
+
+def get_recommendations(df, model, preferences, n=5):
+    """Get recommendations using the trained model"""
+    # First filter based on basic criteria
+    filtered = df.copy()
+    
+    # Apply filters
+    if 'gender' in preferences:
+        filtered = filtered[filtered['Gender'] == preferences['gender']]
+    
+    if 'wifi' in preferences:
+        filtered = filtered[filtered['WiFi'] == preferences['wifi']]
+    
+    if 'room_type' in preferences:
+        filtered = filtered[filtered['Room Type'] == preferences['room_type']]
+    
+    # If no results, use all data
+    if len(filtered) == 0:
+        filtered = df.copy()
+    
+    # Get AI scores from model
+    if model is not None:
+        try:
+            ai_scores = []
+            for _, row in filtered.iterrows():
+                input_df = pd.DataFrame([{
+                    "Budget (UGX/sem)": [row['Budget (UGX/sem)']],
+                    "Gender": [row['Gender']],
+                    "Distance (km)": [row['Distance (km)']],
+                    "WiFi": [row['WiFi']],
+                    "Water": [row['Water']],
+                    "Security": [row['Security']],
+                    "Room Type": [row['Room Type']],
+                    "Bathroom": [row['Bathroom']],
+                    "Kitchen": [row['Kitchen']]
+                }])
+                score = model.predict(input_df)[0]
+                ai_scores.append(score)
+            
+            filtered['AI_Score'] = ai_scores
+            
+        except Exception as e:
+            st.warning(f"Model prediction warning: {str(e)}")
+            filtered['AI_Score'] = 1 - abs(filtered['Budget (UGX/sem)'] - preferences['budget']) / 1000000
+    
+    # Calculate match scores
+    match_scores = []
+    for _, row in filtered.iterrows():
+        scores = get_match_scores(row, preferences)
+        match_scores.append(scores)
+    
+    match_df = pd.DataFrame(match_scores)
+    filtered = pd.concat([filtered.reset_index(drop=True), match_df], axis=1)
+    
+    # Calculate final score
+    if 'AI_Score' in filtered.columns:
+        filtered['Final_Score'] = (
+            filtered['AI_Score'] * 0.5 + 
+            filtered['Overall'] / 20 * 0.5
+        )
+    else:
+        filtered['Final_Score'] = filtered['Overall'] / 20
+    
+    # Sort by final score
+    filtered = filtered.sort_values('Final_Score', ascending=False)
+    
+    return filtered.head(n)
 
 # ---------------------------------------
 # MAIN APP
@@ -180,13 +508,67 @@ def main():
     
     model = load_model()
     
+    # Initialize NLP
+    nlp = initialize_nlp()
+    nlp = build_nlp_corpus(df)
+    
     # Title
     st.title("Lira University Hostel Recommendation System")
-    st.write("AI-powered recommendation system to find your ideal hostel")
+    st.write("AI-powered recommendation with Natural Language Processing")
     
-    # Sidebar
+    # NLP Search Box
+    st.markdown("---")
+    st.subheader("Natural Language Search")
+    st.markdown("Describe what you're looking for in natural language (e.g., 'I need a single room with wifi near campus within 1km with a budget of 300k')")
+    
+    nlp_query = st.text_input("Type your hostel requirements:", placeholder="e.g., I want a single room with wifi and private bathroom near campus")
+    
+    if nlp_query:
+        with st.spinner("Analyzing your request with NLP..."):
+            # Extract preferences from NLP
+            nlp_preferences = nlp.extract_preferences_from_text(nlp_query)
+            
+            # Get semantic similarity matches
+            semantic_indices, semantic_scores = nlp.get_semantic_similarity(nlp_query, top_n=5)
+            
+            # Display extracted preferences
+            st.markdown('<div class="nlp-highlight">', unsafe_allow_html=True)
+            st.markdown("**NLP Extracted Preferences:**")
+            col1, col2, col3 = st.columns(3)
+            with col1:
+                st.write(f"Budget: UGX {nlp_preferences['budget']:,}")
+                st.write(f"Distance: {nlp_preferences['distance']} km")
+                st.write(f"Gender: {nlp_preferences['gender']}")
+            with col2:
+                st.write(f"Room Type: {nlp_preferences['room_type']}")
+                st.write(f"WiFi: {nlp_preferences['wifi']}")
+                st.write(f"Water: {nlp_preferences['water']}")
+            with col3:
+                st.write(f"Security: {nlp_preferences['security']}")
+                st.write(f"Bathroom: {nlp_preferences['bathroom']}")
+                st.write(f"Kitchen: {nlp_preferences['kitchen']}")
+            
+            # Show semantic matches
+            if semantic_indices is not None:
+                st.markdown("**Semantic Matches (NLP Understanding):**")
+                for idx, score in zip(semantic_indices, semantic_scores):
+                    hostel = df.iloc[idx]
+                    st.write(f"- {hostel['Hostel']} (Relevance: {score*100:.1f}%)")
+            st.markdown('</div>', unsafe_allow_html=True)
+            
+            # Get recommendations based on NLP preferences
+            recommendations = get_recommendations(df, model, nlp_preferences, 5)
+            
+            # Display recommendations
+            st.markdown("---")
+            st.subheader("Recommended Hostels")
+            display_recommendations(recommendations, nlp_preferences, model, nlp_query)
+    
+    st.markdown("---")
+    
+    # Traditional sidebar for structured input
     with st.sidebar:
-        st.header("Student Preferences")
+        st.header("Structured Preferences")
         st.markdown("---")
         
         budget = st.number_input(
@@ -237,9 +619,8 @@ def main():
         if st.button("Find Best Hostel", use_container_width=True):
             st.session_state.search = True
     
-    # Main content
+    # Traditional search results
     if 'search' in st.session_state and st.session_state.search:
-        # Prepare preferences
         preferences = {
             'budget': budget,
             'gender': gender,
@@ -252,87 +633,14 @@ def main():
             'kitchen': kitchen
         }
         
-        # Get recommendations using the trained model
         recommendations = get_recommendations(df, model, preferences, num_recommendations)
-        
-        # Display results
         display_recommendations(recommendations, preferences, model)
         
         st.session_state.search = False
-    else:
+    elif not nlp_query:
         display_overview(df)
 
-def get_recommendations(df, model, preferences, n=5):
-    """Get recommendations using the trained model"""
-    # First filter based on basic criteria
-    filtered = df.copy()
-    
-    # Apply filters
-    if 'gender' in preferences:
-        filtered = filtered[filtered['Gender'] == preferences['gender']]
-    
-    if 'wifi' in preferences:
-        filtered = filtered[filtered['WiFi'] == preferences['wifi']]
-    
-    if 'room_type' in preferences:
-        filtered = filtered[filtered['Room Type'] == preferences['room_type']]
-    
-    # If no results, use all data
-    if len(filtered) == 0:
-        filtered = df.copy()
-    
-    # Get AI scores from model
-    if model is not None:
-        try:
-            # Prepare input for model
-            input_data = []
-            for _, row in filtered.iterrows():
-                input_row = {
-                    "Budget (UGX/sem)": [row['Budget (UGX/sem)']],
-                    "Gender": [row['Gender']],
-                    "Distance (km)": [row['Distance (km)']],
-                    "WiFi": [row['WiFi']],
-                    "Water": [row['Water']],
-                    "Security": [row['Security']],
-                    "Room Type": [row['Room Type']],
-                    "Bathroom": [row['Bathroom']],
-                    "Kitchen": [row['Kitchen']]
-                }
-                input_df = pd.DataFrame(input_row)
-                score = model.predict(input_df)[0]
-                input_data.append(score)
-            
-            filtered['AI_Score'] = input_data
-            
-        except Exception as e:
-            st.warning(f"Model prediction warning: {str(e)}")
-            # Fallback: use budget similarity
-            filtered['AI_Score'] = 1 - abs(filtered['Budget (UGX/sem)'] - preferences['budget']) / 1000000
-    
-    # Calculate match scores
-    match_scores = []
-    for _, row in filtered.iterrows():
-        scores = get_match_scores(row, preferences)
-        match_scores.append(scores)
-    
-    match_df = pd.DataFrame(match_scores)
-    filtered = pd.concat([filtered.reset_index(drop=True), match_df], axis=1)
-    
-    # Calculate final score (combine AI score and match scores)
-    if 'AI_Score' in filtered.columns:
-        filtered['Final_Score'] = (
-            filtered['AI_Score'] * 0.5 + 
-            filtered['Overall'] / 20 * 0.5
-        )
-    else:
-        filtered['Final_Score'] = filtered['Overall'] / 20
-    
-    # Sort by final score
-    filtered = filtered.sort_values('Final_Score', ascending=False)
-    
-    return filtered.head(n)
-
-def display_recommendations(recommendations, preferences, model):
+def display_recommendations(recommendations, preferences, model, nlp_query=None):
     """Display recommendations with match scores"""
     if len(recommendations) == 0:
         st.warning("No recommendations found. Please adjust your preferences.")
@@ -340,11 +648,19 @@ def display_recommendations(recommendations, preferences, model):
     
     top_hostel = recommendations.iloc[0]
     
-    # Get AI score from model
+    # Get AI score
     if model is not None and 'AI_Score' in top_hostel:
         ai_score = top_hostel['AI_Score']
     else:
         ai_score = top_hostel['Final_Score'] * 5
+    
+    # Show NLP query if provided
+    if nlp_query:
+        st.markdown(f"""
+        <div class="nlp-highlight">
+            <strong>NLP Query:</strong> {nlp_query}
+        </div>
+        """, unsafe_allow_html=True)
     
     st.success("Recommendation Generated Successfully")
     
@@ -431,7 +747,6 @@ def display_recommendations(recommendations, preferences, model):
         }
         
         for key, value in match_data.items():
-            # Color based on score
             color = '#28a745' if value >= 70 else '#ffc107' if value >= 50 else '#dc3545'
             st.markdown(f"""
             <div>
@@ -475,7 +790,7 @@ def display_recommendations(recommendations, preferences, model):
                     </div>
                     """, unsafe_allow_html=True)
     
-    # Show all recommendations in a table
+    # Show all recommendations
     with st.expander("View All Recommendations"):
         display_cols = ['Hostel', 'Budget (UGX/sem)', 'Distance (km)', 
                        'Budget', 'Facilities', 'Distance', 'Overall']
@@ -484,7 +799,6 @@ def display_recommendations(recommendations, preferences, model):
         display_df = recommendations[display_cols].copy()
         display_df['Budget (UGX/sem)'] = display_df['Budget (UGX/sem)'].apply(lambda x: f"UGX {int(x):,}")
         
-        # Rename columns for display
         display_df.columns = ['Hostel', 'Budget', 'Distance', 
                              'Budget %', 'Facilities %', 'Distance %', 'Overall %']
         
@@ -559,8 +873,16 @@ def display_overview(df):
             }
         )
     
-    # Usage instructions
-    st.info("Use the sidebar to set your preferences and click 'Find Best Hostel' to get AI-powered recommendations with detailed match scores.")
+    # NLP examples
+    with st.expander("Try NLP Search Examples"):
+        st.markdown("""
+        Try typing these examples in the NLP search box:
+        - "I need a single room with wifi and private bathroom near campus"
+        - "Looking for a hostel with 24/7 security and reliable water supply"
+        - "Budget 250k for a double room with shared kitchen"
+        - "Female only hostel within 1km with good security"
+        - "Mixed hostel with wifi and water always available"
+        """)
 
 # ---------------------------------------
 # FOOTER
@@ -568,7 +890,7 @@ def display_overview(df):
 st.markdown("""
 <div class="footer">
 Lira University Hostel Recommendation System<br>
-Powered by AI | Machine Learning | Smart Matching
+Powered by AI | NLP | Machine Learning | Smart Matching
 </div>
 """, unsafe_allow_html=True)
 
