@@ -113,151 +113,60 @@ def load_data():
 def load_model():
     """Load the trained model"""
     try:
-        return joblib.load("hostel_ai_model.pkl")
-    except:
+        model = joblib.load("hostel_ai_model.pkl")
+        return model
+    except Exception as e:
+        st.warning(f"Model loading warning: {str(e)}")
         return None
 
 # ---------------------------------------
-# ENHANCED RECOMMENDATION ENGINE
+# HELPER FUNCTIONS
 # ---------------------------------------
-class EnhancedRecommender:
-    def __init__(self, df):
-        self.df = df.copy()
-        self.categorical_columns = ['Gender', 'WiFi', 'Water', 'Security', 'Room Type', 'Bathroom', 'Kitchen']
-        self.numerical_columns = ['Budget (UGX/sem)', 'Distance (km)']
-        self.label_encoders = {}
-        self.feature_matrix = None
-        self._prepare_features()
+def get_match_scores(hostel, preferences):
+    """Calculate match scores for a hostel"""
+    scores = {}
     
-    def _prepare_features(self):
-        """Prepare features for similarity calculations"""
-        # Filter existing categorical columns
-        existing_cat = [col for col in self.categorical_columns if col in self.df.columns]
-        self.categorical_columns = existing_cat
-        
-        # Encode categorical features
-        for col in existing_cat:
-            le = LabelEncoder()
-            self.df[f'{col}_encoded'] = le.fit_transform(self.df[col].astype(str))
-            self.label_encoders[col] = le
-        
-        # Normalize numerical features
-        self.numeric_stats = {}
-        for col in self.numerical_columns:
-            if col in self.df.columns:
-                mean = self.df[col].mean()
-                std = self.df[col].std()
-                self.numeric_stats[col] = {'mean': mean, 'std': std}
-                
-                if std > 0:
-                    self.df[f'{col}_normalized'] = (self.df[col] - mean) / std
-                else:
-                    self.df[f'{col}_normalized'] = 0
-        
-        # Create feature matrix
-        feature_cols = []
-        for col in self.numerical_columns:
-            if f'{col}_normalized' in self.df.columns:
-                feature_cols.append(f'{col}_normalized')
-        
-        for col in existing_cat:
-            if f'{col}_encoded' in self.df.columns:
-                feature_cols.append(f'{col}_encoded')
-        
-        self.feature_cols = feature_cols
-        self.feature_matrix = self.df[feature_cols].values
+    # 1. Budget match
+    if 'Budget (UGX/sem)' in hostel and 'budget' in preferences:
+        budget_diff = abs(hostel['Budget (UGX/sem)'] - preferences['budget'])
+        max_budget = 1000000  # Max budget in dataset
+        scores['Budget'] = max(0, 100 - (budget_diff / max_budget * 100))
+    else:
+        scores['Budget'] = 50
     
-    def get_recommendations(self, preferences, n=5):
-        """Get top N recommendations with match scores"""
-        # Create preference vector
-        preference_vector = []
-        
-        # Numerical features
-        for col in self.numerical_columns:
-            if col in preferences and col in self.numeric_stats:
-                stats = self.numeric_stats[col]
-                if stats['std'] > 0:
-                    norm_val = (preferences[col] - stats['mean']) / stats['std']
-                else:
-                    norm_val = 0
-                preference_vector.append(norm_val)
-            else:
-                preference_vector.append(0)
-        
-        # Categorical features
-        for col in self.categorical_columns:
-            if col in preferences and col in self.label_encoders:
-                try:
-                    encoded = self.label_encoders[col].transform([preferences[col]])[0]
-                    preference_vector.append(encoded)
-                except:
-                    preference_vector.append(0)
-            else:
-                preference_vector.append(0)
-        
-        preference_vector = np.array(preference_vector).reshape(1, -1)
-        
-        # Ensure dimensions match
-        min_dim = min(preference_vector.shape[1], self.feature_matrix.shape[1])
-        preference_vector = preference_vector[:, :min_dim]
-        feature_matrix = self.feature_matrix[:, :min_dim]
-        
-        # Calculate cosine similarities
-        similarities = cosine_similarity(preference_vector, feature_matrix)[0]
-        
-        # Get top N
-        top_indices = np.argsort(similarities)[::-1][:n]
-        
-        recommendations = self.df.iloc[top_indices].copy()
-        recommendations['Similarity Score'] = similarities[top_indices] * 100  # Convert to percentage
-        
-        # Calculate budget compatibility
-        if 'Budget (UGX/sem)' in preferences and 'Budget (UGX/sem)' in recommendations.columns:
-            budget_diff = abs(recommendations['Budget (UGX/sem)'] - preferences['budget'])
-            max_diff = budget_diff.max() if budget_diff.max() > 0 else 1
-            recommendations['Budget Score'] = (1 - budget_diff / max_diff) * 100
+    # 2. Distance match
+    if 'Distance (km)' in hostel and 'distance' in preferences:
+        if hostel['Distance (km)'] <= preferences['distance']:
+            scores['Distance'] = 100
         else:
-            recommendations['Budget Score'] = recommendations['Similarity Score']
-        
-        # Calculate facility compatibility
-        facility_score = []
-        for _, row in recommendations.iterrows():
-            match_count = 0
-            total_count = 0
-            for col in self.categorical_columns:
-                if col in preferences and col in row:
-                    total_count += 1
-                    if str(row[col]).lower() == str(preferences[col]).lower():
-                        match_count += 1
-            if total_count > 0:
-                facility_score.append((match_count / total_count) * 100)
-            else:
-                facility_score.append(50)  # Default if no matches
-        
-        recommendations['Facility Score'] = facility_score
-        
-        # Calculate distance compatibility
-        if 'distance' in preferences and 'Distance (km)' in recommendations.columns:
-            max_dist = recommendations['Distance (km)'].max() if recommendations['Distance (km)'].max() > 0 else 1
-            recommendations['Distance Score'] = (1 - recommendations['Distance (km)'] / max_dist) * 100
-        else:
-            recommendations['Distance Score'] = 70
-        
-        # Calculate overall score (weighted average)
-        recommendations['Overall Score'] = (
-            recommendations['Similarity Score'] * 0.35 +
-            recommendations['Budget Score'] * 0.25 +
-            recommendations['Facility Score'] * 0.25 +
-            recommendations['Distance Score'] * 0.15
-        )
-        
-        # Round scores
-        score_columns = ['Similarity Score', 'Budget Score', 'Facility Score', 'Distance Score', 'Overall Score']
-        for col in score_columns:
-            if col in recommendations.columns:
-                recommendations[col] = recommendations[col].round(1)
-        
-        return recommendations.sort_values('Overall Score', ascending=False)
+            scores['Distance'] = max(0, 100 - ((hostel['Distance (km)'] - preferences['distance']) / 5 * 100))
+    else:
+        scores['Distance'] = 50
+    
+    # 3. Facility matches
+    facility_cols = ['Gender', 'WiFi', 'Water', 'Security', 'Room Type', 'Bathroom', 'Kitchen']
+    matches = 0
+    total = 0
+    
+    for col in facility_cols:
+        if col in hostel and col.lower() in preferences:
+            total += 1
+            # Convert both to strings for comparison
+            hostel_val = str(hostel[col]).lower()
+            pref_val = str(preferences[col.lower()]).lower()
+            if hostel_val == pref_val:
+                matches += 1
+    
+    scores['Facilities'] = (matches / total * 100) if total > 0 else 50
+    
+    # 4. Overall match (weighted average)
+    scores['Overall'] = (
+        scores['Budget'] * 0.30 +
+        scores['Distance'] * 0.25 +
+        scores['Facilities'] * 0.45
+    )
+    
+    return scores
 
 # ---------------------------------------
 # MAIN APP
@@ -270,7 +179,6 @@ def main():
         return
     
     model = load_model()
-    recommender = EnhancedRecommender(df)
     
     # Title
     st.title("Lira University Hostel Recommendation System")
@@ -344,8 +252,8 @@ def main():
             'kitchen': kitchen
         }
         
-        # Get recommendations
-        recommendations = recommender.get_recommendations(preferences, num_recommendations)
+        # Get recommendations using the trained model
+        recommendations = get_recommendations(df, model, preferences, num_recommendations)
         
         # Display results
         display_recommendations(recommendations, preferences, model)
@@ -354,33 +262,89 @@ def main():
     else:
         display_overview(df)
 
+def get_recommendations(df, model, preferences, n=5):
+    """Get recommendations using the trained model"""
+    # First filter based on basic criteria
+    filtered = df.copy()
+    
+    # Apply filters
+    if 'gender' in preferences:
+        filtered = filtered[filtered['Gender'] == preferences['gender']]
+    
+    if 'wifi' in preferences:
+        filtered = filtered[filtered['WiFi'] == preferences['wifi']]
+    
+    if 'room_type' in preferences:
+        filtered = filtered[filtered['Room Type'] == preferences['room_type']]
+    
+    # If no results, use all data
+    if len(filtered) == 0:
+        filtered = df.copy()
+    
+    # Get AI scores from model
+    if model is not None:
+        try:
+            # Prepare input for model
+            input_data = []
+            for _, row in filtered.iterrows():
+                input_row = {
+                    "Budget (UGX/sem)": [row['Budget (UGX/sem)']],
+                    "Gender": [row['Gender']],
+                    "Distance (km)": [row['Distance (km)']],
+                    "WiFi": [row['WiFi']],
+                    "Water": [row['Water']],
+                    "Security": [row['Security']],
+                    "Room Type": [row['Room Type']],
+                    "Bathroom": [row['Bathroom']],
+                    "Kitchen": [row['Kitchen']]
+                }
+                input_df = pd.DataFrame(input_row)
+                score = model.predict(input_df)[0]
+                input_data.append(score)
+            
+            filtered['AI_Score'] = input_data
+            
+        except Exception as e:
+            st.warning(f"Model prediction warning: {str(e)}")
+            # Fallback: use budget similarity
+            filtered['AI_Score'] = 1 - abs(filtered['Budget (UGX/sem)'] - preferences['budget']) / 1000000
+    
+    # Calculate match scores
+    match_scores = []
+    for _, row in filtered.iterrows():
+        scores = get_match_scores(row, preferences)
+        match_scores.append(scores)
+    
+    match_df = pd.DataFrame(match_scores)
+    filtered = pd.concat([filtered.reset_index(drop=True), match_df], axis=1)
+    
+    # Calculate final score (combine AI score and match scores)
+    if 'AI_Score' in filtered.columns:
+        filtered['Final_Score'] = (
+            filtered['AI_Score'] * 0.5 + 
+            filtered['Overall'] / 20 * 0.5
+        )
+    else:
+        filtered['Final_Score'] = filtered['Overall'] / 20
+    
+    # Sort by final score
+    filtered = filtered.sort_values('Final_Score', ascending=False)
+    
+    return filtered.head(n)
+
 def display_recommendations(recommendations, preferences, model):
-    """Display recommendations with match scores and breakdown"""
+    """Display recommendations with match scores"""
     if len(recommendations) == 0:
         st.warning("No recommendations found. Please adjust your preferences.")
         return
     
     top_hostel = recommendations.iloc[0]
     
-    # Get AI score from model if available
-    if model is not None:
-        try:
-            input_df = pd.DataFrame([{
-                "Budget (UGX/sem)": [preferences['budget']],
-                "Gender": [preferences['gender']],
-                "Distance (km)": [preferences['distance']],
-                "WiFi": [preferences['wifi']],
-                "Water": [preferences['water']],
-                "Security": [preferences['security']],
-                "Room Type": [preferences['room_type']],
-                "Bathroom": [preferences['bathroom']],
-                "Kitchen": [preferences['kitchen']]
-            }])
-            ai_score = model.predict(input_df)[0]
-        except:
-            ai_score = top_hostel['Overall Score'] / 20
+    # Get AI score from model
+    if model is not None and 'AI_Score' in top_hostel:
+        ai_score = top_hostel['AI_Score']
     else:
-        ai_score = top_hostel['Overall Score'] / 20
+        ai_score = top_hostel['Final_Score'] * 5
     
     st.success("Recommendation Generated Successfully")
     
@@ -428,9 +392,9 @@ def display_recommendations(recommendations, preferences, model):
         st.markdown(f"""
         <div class="card">
             <h3>{top_hostel['Hostel']}</h3>
-            <p><strong>Overall Match:</strong> {top_hostel['Overall Score']:.1f}%</p>
+            <p><strong>Overall Match:</strong> {top_hostel['Overall']:.1f}%</p>
             <div class="score-bar">
-                <div class="score-bar-fill" style="width: {top_hostel['Overall Score']:.1f}%;"></div>
+                <div class="score-bar-fill" style="width: {top_hostel['Overall']:.1f}%;"></div>
             </div>
             <p><strong>Budget:</strong> UGX {int(top_hostel['Budget (UGX/sem)']):,} | <strong>Distance:</strong> {top_hostel['Distance (km)']} km</p>
             <div style="margin: 10px 0;">
@@ -460,11 +424,10 @@ def display_recommendations(recommendations, preferences, model):
         st.subheader("Match Breakdown")
         
         match_data = {
-            'Overall Match': top_hostel['Overall Score'],
-            'Similarity': top_hostel['Similarity Score'],
-            'Budget': top_hostel['Budget Score'],
-            'Facilities': top_hostel['Facility Score'],
-            'Distance': top_hostel['Distance Score']
+            'Overall Match': top_hostel['Overall'],
+            'Budget': top_hostel['Budget'],
+            'Facilities': top_hostel['Facilities'],
+            'Distance': top_hostel['Distance']
         }
         
         for key, value in match_data.items():
@@ -497,10 +460,10 @@ def display_recommendations(recommendations, preferences, model):
                     <div class="card" style="padding: 15px;">
                         <h4 style="color: #003366; margin: 0;">{hostel['Hostel']}</h4>
                         <p style="margin: 5px 0;">
-                            <strong>Match:</strong> {hostel['Overall Score']:.1f}%
+                            <strong>Match:</strong> {hostel['Overall']:.1f}%
                         </p>
                         <div class="score-bar">
-                            <div class="score-bar-fill" style="width: {hostel['Overall Score']:.1f}%;"></div>
+                            <div class="score-bar-fill" style="width: {hostel['Overall']:.1f}%;"></div>
                         </div>
                         <p style="font-size: 14px; margin: 5px 0;">
                             UGX {int(hostel['Budget (UGX/sem)']):,} | {hostel['Distance (km)']} km
@@ -514,24 +477,21 @@ def display_recommendations(recommendations, preferences, model):
     
     # Show all recommendations in a table
     with st.expander("View All Recommendations"):
-        display_cols = ['Hostel', 'Budget (UGX/sem)', 'Distance (km)', 'Similarity Score', 
-                       'Budget Score', 'Facility Score', 'Distance Score', 'Overall Score']
+        display_cols = ['Hostel', 'Budget (UGX/sem)', 'Distance (km)', 
+                       'Budget', 'Facilities', 'Distance', 'Overall']
         display_cols = [col for col in display_cols if col in recommendations.columns]
         
         display_df = recommendations[display_cols].copy()
         display_df['Budget (UGX/sem)'] = display_df['Budget (UGX/sem)'].apply(lambda x: f"UGX {int(x):,}")
         
+        # Rename columns for display
+        display_df.columns = ['Hostel', 'Budget', 'Distance', 
+                             'Budget %', 'Facilities %', 'Distance %', 'Overall %']
+        
         st.dataframe(
             display_df,
             use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Similarity Score": "Match %",
-                "Budget Score": "Budget %",
-                "Facility Score": "Facilities %",
-                "Distance Score": "Distance %",
-                "Overall Score": "Overall %"
-            }
+            hide_index=True
         )
 
 def display_overview(df):
