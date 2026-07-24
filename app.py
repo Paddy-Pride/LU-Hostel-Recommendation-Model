@@ -309,7 +309,106 @@ if st.button("Find Hostel Using AI"):
         st.subheader(
             "Why AI Selected This Hostel"
         )
+# -------------------------
+# AI EXPLANATION
+# -------------------------
 
+st.divider()
+
+st.subheader(
+    "🤖 AI Explanation"
+)
+
+
+explanation = []
+
+
+# Budget explanation
+
+if recommended["Difference"] == 0:
+
+    explanation.append(
+        "✅ The hostel price exactly matches your budget."
+    )
+
+else:
+
+    explanation.append(
+        f"✅ The hostel price is close to your budget of UGX {preferences['Budget (UGX/sem)']:,}."
+    )
+
+
+
+# WiFi explanation
+
+if recommended["WiFi"] == preferences["WiFi"]:
+
+    explanation.append(
+        "✅ It provides the WiFi option you requested."
+    )
+
+
+
+# Bathroom explanation
+
+if recommended["Bathroom"] == preferences["Bathroom"]:
+
+    explanation.append(
+        "✅ It matches your bathroom preference."
+    )
+
+
+
+# Room explanation
+
+if recommended["Room Type"] == preferences["Room Type"]:
+
+    explanation.append(
+        "✅ It matches your preferred room type."
+    )
+
+
+
+# Distance explanation
+
+if recommended["Distance (km)"] <= preferences["Distance (km)"]:
+
+    explanation.append(
+        "✅ It is within your preferred distance from campus."
+    )
+
+
+
+for item in explanation:
+
+    st.write(item)
+
+
+
+# Confidence
+
+match_percentage = (
+    recommended["Match Score"]/5
+)*100
+
+
+if match_percentage >= 80:
+
+    st.success(
+        "Recommendation Confidence: High"
+    )
+
+elif match_percentage >= 50:
+
+    st.info(
+        "Recommendation Confidence: Medium"
+    )
+
+else:
+
+    st.warning(
+        "Recommendation Confidence: Low"
+    )
 
         if recommended["WiFi"] == preferences["WiFi"]:
             st.write("✅ Has your preferred WiFi option")
