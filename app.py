@@ -4,7 +4,6 @@ import numpy as np
 import joblib
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics.pairwise import cosine_similarity
-from sklearn.feature_extraction.text import TfidfVectorizer
 import warnings
 warnings.filterwarnings('ignore')
 
@@ -123,15 +122,16 @@ def load_model():
 # ---------------------------------------
 class EnhancedRecommender:
     def __init__(self, df):
-        self.df = df
+        self.df = df.copy()
         self.categorical_columns = ['Gender', 'WiFi', 'Water', 'Security', 'Room Type', 'Bathroom', 'Kitchen']
         self.numerical_columns = ['Budget (UGX/sem)', 'Distance (km)']
         self.label_encoders = {}
+        self.feature_matrix = None
         self._prepare_features()
     
     def _prepare_features(self):
         """Prepare features for similarity calculations"""
-        # Filter existing columns
+        # Filter existing categorical columns
         existing_cat = [col for col in self.categorical_columns if col in self.df.columns]
         self.categorical_columns = existing_cat
         
@@ -164,11 +164,11 @@ class EnhancedRecommender:
             if f'{col}_encoded' in self.df.columns:
                 feature_cols.append(f'{col}_encoded')
         
-        self.feature_matrix = self.df[feature_cols].values
         self.feature_cols = feature_cols
+        self.feature_matrix = self.df[feature_cols].values
     
     def get_recommendations(self, preferences, n=5):
-        """Get top N recommendations"""
+        """Get top N recommendations with match scores"""
         # Create preference vector
         preference_vector = []
         
@@ -181,6 +181,8 @@ class EnhancedRecommender:
                 else:
                     norm_val = 0
                 preference_vector.append(norm_val)
+            else:
+                preference_vector.append(0)
         
         # Categorical features
         for col in self.categorical_columns:
@@ -200,26 +202,60 @@ class EnhancedRecommender:
         preference_vector = preference_vector[:, :min_dim]
         feature_matrix = self.feature_matrix[:, :min_dim]
         
-        # Calculate similarities
+        # Calculate cosine similarities
         similarities = cosine_similarity(preference_vector, feature_matrix)[0]
         
         # Get top N
         top_indices = np.argsort(similarities)[::-1][:n]
         
         recommendations = self.df.iloc[top_indices].copy()
-        recommendations['Match Score'] = similarities[top_indices] * 100
+        recommendations['Similarity Score'] = similarities[top_indices] * 100  # Convert to percentage
         
         # Calculate budget compatibility
         if 'Budget (UGX/sem)' in preferences and 'Budget (UGX/sem)' in recommendations.columns:
             budget_diff = abs(recommendations['Budget (UGX/sem)'] - preferences['budget'])
             max_diff = budget_diff.max() if budget_diff.max() > 0 else 1
-            recommendations['Budget Match'] = (1 - budget_diff / max_diff) * 100
+            recommendations['Budget Score'] = (1 - budget_diff / max_diff) * 100
+        else:
+            recommendations['Budget Score'] = recommendations['Similarity Score']
         
-        # Calculate overall score
+        # Calculate facility compatibility
+        facility_score = []
+        for _, row in recommendations.iterrows():
+            match_count = 0
+            total_count = 0
+            for col in self.categorical_columns:
+                if col in preferences and col in row:
+                    total_count += 1
+                    if str(row[col]).lower() == str(preferences[col]).lower():
+                        match_count += 1
+            if total_count > 0:
+                facility_score.append((match_count / total_count) * 100)
+            else:
+                facility_score.append(50)  # Default if no matches
+        
+        recommendations['Facility Score'] = facility_score
+        
+        # Calculate distance compatibility
+        if 'distance' in preferences and 'Distance (km)' in recommendations.columns:
+            max_dist = recommendations['Distance (km)'].max() if recommendations['Distance (km)'].max() > 0 else 1
+            recommendations['Distance Score'] = (1 - recommendations['Distance (km)'] / max_dist) * 100
+        else:
+            recommendations['Distance Score'] = 70
+        
+        # Calculate overall score (weighted average)
         recommendations['Overall Score'] = (
-            recommendations['Match Score'] * 0.6 + 
-            recommendations.get('Budget Match', recommendations['Match Score']) * 0.4
+            recommendations['Similarity Score'] * 0.35 +
+            recommendations['Budget Score'] * 0.25 +
+            recommendations['Facility Score'] * 0.25 +
+            recommendations['Distance Score'] * 0.15
         )
+        
+        # Round scores
+        score_columns = ['Similarity Score', 'Budget Score', 'Facility Score', 'Distance Score', 'Overall Score']
+        for col in score_columns:
+            if col in recommendations.columns:
+                recommendations[col] = recommendations[col].round(1)
         
         return recommendations.sort_values('Overall Score', ascending=False)
 
@@ -319,7 +355,7 @@ def main():
         display_overview(df)
 
 def display_recommendations(recommendations, preferences, model):
-    """Display recommendations"""
+    """Display recommendations with match scores and breakdown"""
     if len(recommendations) == 0:
         st.warning("No recommendations found. Please adjust your preferences.")
         return
@@ -392,9 +428,9 @@ def display_recommendations(recommendations, preferences, model):
         st.markdown(f"""
         <div class="card">
             <h3>{top_hostel['Hostel']}</h3>
-            <p><strong>Match Score:</strong> {top_hostel['Match Score']:.1f}%</p>
+            <p><strong>Overall Match:</strong> {top_hostel['Overall Score']:.1f}%</p>
             <div class="score-bar">
-                <div class="score-bar-fill" style="width: {top_hostel['Match Score']:.1f}%;"></div>
+                <div class="score-bar-fill" style="width: {top_hostel['Overall Score']:.1f}%;"></div>
             </div>
             <p><strong>Budget:</strong> UGX {int(top_hostel['Budget (UGX/sem)']):,} | <strong>Distance:</strong> {top_hostel['Distance (km)']} km</p>
             <div style="margin: 10px 0;">
@@ -425,19 +461,23 @@ def display_recommendations(recommendations, preferences, model):
         
         match_data = {
             'Overall Match': top_hostel['Overall Score'],
-            'Similarity': top_hostel['Match Score'],
-            'Budget': top_hostel.get('Budget Match', top_hostel['Match Score'])
+            'Similarity': top_hostel['Similarity Score'],
+            'Budget': top_hostel['Budget Score'],
+            'Facilities': top_hostel['Facility Score'],
+            'Distance': top_hostel['Distance Score']
         }
         
         for key, value in match_data.items():
+            # Color based on score
+            color = '#28a745' if value >= 70 else '#ffc107' if value >= 50 else '#dc3545'
             st.markdown(f"""
             <div>
                 <div style="display: flex; justify-content: space-between;">
                     <span>{key}</span>
-                    <span>{value:.1f}%</span>
+                    <span style="color: {color}; font-weight: bold;">{value:.1f}%</span>
                 </div>
                 <div class="score-bar">
-                    <div class="score-bar-fill" style="width: {value:.1f}%;"></div>
+                    <div class="score-bar-fill" style="width: {value:.1f}%; background: {color};"></div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
@@ -465,21 +505,32 @@ def display_recommendations(recommendations, preferences, model):
                         <p style="font-size: 14px; margin: 5px 0;">
                             UGX {int(hostel['Budget (UGX/sem)']):,} | {hostel['Distance (km)']} km
                         </p>
-                        <span class="badge">{hostel['Room Type']}</span>
-                        <span class="badge">{hostel['Bathroom']}</span>
+                        <div>
+                            <span class="badge">{hostel['Room Type']}</span>
+                            <span class="badge">{hostel['Bathroom']}</span>
+                        </div>
                     </div>
                     """, unsafe_allow_html=True)
     
-    # Data preview
-    with st.expander("View All Hostels"):
+    # Show all recommendations in a table
+    with st.expander("View All Recommendations"):
+        display_cols = ['Hostel', 'Budget (UGX/sem)', 'Distance (km)', 'Similarity Score', 
+                       'Budget Score', 'Facility Score', 'Distance Score', 'Overall Score']
+        display_cols = [col for col in display_cols if col in recommendations.columns]
+        
+        display_df = recommendations[display_cols].copy()
+        display_df['Budget (UGX/sem)'] = display_df['Budget (UGX/sem)'].apply(lambda x: f"UGX {int(x):,}")
+        
         st.dataframe(
-            recommendations,
+            display_df,
             use_container_width=True,
             hide_index=True,
             column_config={
-                "Budget (UGX/sem)": st.column_config.NumberColumn("Budget (UGX)", format="UGX %d"),
-                "Match Score": st.column_config.NumberColumn("Match %", format="%.1f%%"),
-                "Overall Score": st.column_config.NumberColumn("Overall %", format="%.1f%%")
+                "Similarity Score": "Match %",
+                "Budget Score": "Budget %",
+                "Facility Score": "Facilities %",
+                "Distance Score": "Distance %",
+                "Overall Score": "Overall %"
             }
         )
 
@@ -549,7 +600,7 @@ def display_overview(df):
         )
     
     # Usage instructions
-    st.info("Use the sidebar to set your preferences and click 'Find Best Hostel' to get AI-powered recommendations.")
+    st.info("Use the sidebar to set your preferences and click 'Find Best Hostel' to get AI-powered recommendations with detailed match scores.")
 
 # ---------------------------------------
 # FOOTER
