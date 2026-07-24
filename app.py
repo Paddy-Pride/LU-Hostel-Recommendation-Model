@@ -198,6 +198,131 @@ if st.button("Find Hostel Using AI"):
         )
 
 
+        # -------------------------
+        # FIND MATCHING HOSTELS
+        # -------------------------
+
+        results = df.copy()
+
+
+        results["Difference"] = abs(
+            results["Budget (UGX/sem)"]
+            -
+            preferences["Budget (UGX/sem)"]
+        )
+
+
+        # Match important preferences
+
+        results["Match Score"] = 0
+
+
+        results.loc[
+            results["Gender"] == preferences["Gender"],
+            "Match Score"
+        ] += 1
+
+
+        results.loc[
+            results["WiFi"] == preferences["WiFi"],
+            "Match Score"
+        ] += 1
+
+
+        results.loc[
+            results["Room Type"] == preferences["Room Type"],
+            "Match Score"
+        ] += 1
+
+
+        results.loc[
+            results["Bathroom"] == preferences["Bathroom"],
+            "Match Score"
+        ] += 1
+
+
+        results.loc[
+            results["Kitchen"] == preferences["Kitchen"],
+            "Match Score"
+        ] += 1
+
+
+
+        # Sort recommendation
+
+        results = results.sort_values(
+            by=[
+                "Match Score",
+                "Difference",
+                "Recommendation Score"
+            ],
+            ascending=[
+                False,
+                True,
+                False
+            ]
+        )
+
+
+        recommended = results.iloc[0]
+
+
+
+        st.divider()
+
+
+        st.subheader(
+            "🏠 AI Recommended Hostel"
+        )
+
+
+        st.write(
+            "###",
+            recommended["Hostel"]
+        )
+
+
+        st.write(
+            "AI Match Score:",
+            str(
+                round(
+                    (recommended["Match Score"]/5)*100
+                )
+            )
+            + "%"
+        )
+
+
+        st.write(
+            "Budget:",
+            f"UGX {int(recommended['Budget (UGX/sem)']):,}"
+        )
+
+
+        st.write(
+            "Distance:",
+            recommended["Distance (km)"],
+            "km"
+        )
+
+
+        st.subheader(
+            "Why AI Selected This Hostel"
+        )
+
+
+        if recommended["WiFi"] == preferences["WiFi"]:
+            st.write("✅ Has your preferred WiFi option")
+
+
+        if recommended["Bathroom"] == preferences["Bathroom"]:
+            st.write("✅ Matches your bathroom preference")
+
+
+        if recommended["Room Type"] == preferences["Room Type"]:
+            st.write("✅ Matches your room preference")
+
+
 # ---------------------------------------
 # PREDICT
 # ---------------------------------------
