@@ -6,21 +6,32 @@ from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.feature_extraction.text import TfidfVectorizer
 import re
-import nltk
-from nltk.corpus import stopwords
-from nltk.tokenize import word_tokenize
-from nltk.stem import WordNetLemmatizer
 import warnings
 warnings.filterwarnings('ignore')
 
-# Download NLTK data (run once)
+# Try to import NLTK, but provide fallback
 try:
-    nltk.data.find('tokenizers/punkt')
-except LookupError:
-    nltk.download('punkt')
-    nltk.download('stopwords')
-    nltk.download('wordnet')
-    nltk.download('omw-1.4')
+    import nltk
+    from nltk.tokenize import word_tokenize
+    from nltk.corpus import stopwords
+    from nltk.stem import WordNetLemmatizer
+    
+    # Download NLTK data with error handling
+    try:
+        nltk.data.find('tokenizers/punkt')
+    except LookupError:
+        try:
+            nltk.download('punkt', quiet=True)
+            nltk.download('stopwords', quiet=True)
+            nltk.download('wordnet', quiet=True)
+            nltk.download('omw-1.4', quiet=True)
+        except:
+            pass
+    
+    NLTK_AVAILABLE = True
+except:
+    NLTK_AVAILABLE = False
+    print("NLTK not available, using simple text processing")
 
 # ---------------------------------------
 # PAGE CONFIG
@@ -100,231 +111,447 @@ h1 {
 """, unsafe_allow_html=True)
 
 # ---------------------------------------
-# NLP PROCESSING CLASS
+# SIMPLE NLP PROCESSING (No NLTK dependency)
 # ---------------------------------------
-class HostelNLP:
+class SimpleTextProcessor:
+    """Simple text processing without NLTK"""
     def __init__(self):
-        self.lemmatizer = WordNetLemmatizer()
-        self.stop_words = set(stopwords.words('english'))
-        self.vectorizer = None
-        self.hostel_descriptions = None
-        self.tfidf_matrix = None
-        
-        # Keywords mapping for better understanding
-        self.keyword_map = {
-            'budget': ['budget', 'cost', 'price', 'affordable', 'cheap', 'expensive', 'money'],
-            'distance': ['distance', 'near', 'close', 'far', 'walking', 'commute'],
-            'security': ['security', 'safe', 'safe', 'guard', 'cctv', 'protected'],
-            'wifi': ['wifi', 'internet', 'network', 'wireless', 'connectivity'],
-            'water': ['water', 'tap', 'supply', 'running water'],
-            'room': ['room', 'single', 'double', 'triple', 'quad', 'spacious'],
-            'bathroom': ['bathroom', 'toilet', 'washroom', 'private', 'shared'],
-            'kitchen': ['kitchen', 'cooking', 'stove', 'fridge', 'prepare food'],
-            'gender': ['gender', 'mixed', 'female', 'male', 'ladies', 'gentlemen']
+        self.stop_words = {
+            'i', 'me', 'my', 'myself', 'we', 'our', 'ours', 'ourselves',
+            'you', 'your', 'yours', 'he', 'him', 'his', 'she', 'her', 'hers',
+            'it', 'its', 'they', 'them', 'their', 'theirs', 'themselves',
+            'am', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+            'have', 'has', 'had', 'having', 'do', 'does', 'did', 'doing',
+            'will', 'would', 'could', 'should', 'may', 'might', 'must',
+            'a', 'an', 'the', 'and', 'but', 'or', 'for', 'nor', 'on', 'at',
+            'to', 'by', 'with', 'without', 'about', 'against', 'between',
+            'through', 'during', 'within', 'upon', 'towards', 'among'
         }
-        
+    
     def preprocess_text(self, text):
-        """Clean and preprocess text for NLP"""
+        """Clean and preprocess text"""
         if not isinstance(text, str):
             return ""
         
         # Convert to lowercase
         text = text.lower()
         
-        # Remove special characters and numbers
+        # Remove special characters
         text = re.sub(r'[^a-zA-Z\s]', '', text)
         
-        # Tokenize
-        tokens = word_tokenize(text)
+        # Simple tokenization (split by spaces)
+        tokens = text.split()
         
-        # Remove stopwords and lemmatize
+        # Remove stopwords and short words
         cleaned_tokens = [
-            self.lemmatizer.lemmatize(token) 
-            for token in tokens 
+            token for token in tokens 
             if token not in self.stop_words and len(token) > 2
         ]
         
         return ' '.join(cleaned_tokens)
-    
-    def build_corpus(self, df):
-        """Build corpus from hostel features"""
-        descriptions = []
+
+# Try to use NLTK if available, otherwise use simple processor
+if NLTK_AVAILABLE:
+    try:
+        class HostelNLP:
+            def __init__(self):
+                self.lemmatizer = WordNetLemmatizer()
+                self.stop_words = set(stopwords.words('english'))
+                self.vectorizer = None
+                self.hostel_descriptions = None
+                self.tfidf_matrix = None
+                
+                self.keyword_map = {
+                    'budget': ['budget', 'cost', 'price', 'affordable', 'cheap', 'expensive', 'money'],
+                    'distance': ['distance', 'near', 'close', 'far', 'walking', 'commute'],
+                    'security': ['security', 'safe', 'guard', 'cctv', 'protected'],
+                    'wifi': ['wifi', 'internet', 'network', 'wireless', 'connectivity'],
+                    'water': ['water', 'tap', 'supply', 'running water'],
+                    'room': ['room', 'single', 'double', 'triple', 'quad', 'spacious'],
+                    'bathroom': ['bathroom', 'toilet', 'washroom', 'private', 'shared'],
+                    'kitchen': ['kitchen', 'cooking', 'stove', 'fridge'],
+                    'gender': ['gender', 'mixed', 'female', 'male', 'ladies', 'gentlemen']
+                }
+                
+            def preprocess_text(self, text):
+                """Clean and preprocess text for NLP"""
+                if not isinstance(text, str):
+                    return ""
+                
+                # Convert to lowercase
+                text = text.lower()
+                
+                # Remove special characters and numbers
+                text = re.sub(r'[^a-zA-Z\s]', '', text)
+                
+                # Tokenize
+                try:
+                    tokens = word_tokenize(text)
+                except:
+                    tokens = text.split()
+                
+                # Remove stopwords and lemmatize
+                cleaned_tokens = []
+                for token in tokens:
+                    if token not in self.stop_words and len(token) > 2:
+                        try:
+                            cleaned_tokens.append(self.lemmatizer.lemmatize(token))
+                        except:
+                            cleaned_tokens.append(token)
+                
+                return ' '.join(cleaned_tokens)
+            
+            def build_corpus(self, df):
+                """Build corpus from hostel features"""
+                descriptions = []
+                
+                for _, row in df.iterrows():
+                    desc = []
+                    
+                    # Create natural language description
+                    desc.append(f"hostel {row.get('Hostel', '')}")
+                    desc.append(f"budget {row.get('Budget (UGX/sem)', '')}")
+                    desc.append(f"distance {row.get('Distance (km)', '')} km")
+                    
+                    # Add categorical features
+                    for col in ['Gender', 'WiFi', 'Water', 'Security', 'Room Type', 'Bathroom', 'Kitchen']:
+                        if col in row:
+                            desc.append(str(row[col]).lower())
+                    
+                    # Add room-specific descriptions
+                    room_type = str(row.get('Room Type', '')).lower()
+                    if 'single' in room_type:
+                        desc.append('private room')
+                    elif 'double' in room_type:
+                        desc.append('shared room')
+                    elif 'triple' in room_type:
+                        desc.append('shared large room')
+                    
+                    # Add security descriptions
+                    security = str(row.get('Security', '')).lower()
+                    if '24/7' in security or 'cctv' in security:
+                        desc.append('high security')
+                    elif 'guard' in security:
+                        desc.append('secure')
+                    
+                    # Add water descriptions
+                    water = str(row.get('Water', '')).lower()
+                    if 'always' in water:
+                        desc.append('reliable water')
+                    elif 'interrupted' in water:
+                        desc.append('unreliable water')
+                    
+                    descriptions.append(' '.join(desc))
+                
+                self.hostel_descriptions = descriptions
+                return descriptions
+            
+            def fit_vectorizer(self, descriptions):
+                """Fit TF-IDF vectorizer on hostel descriptions"""
+                self.vectorizer = TfidfVectorizer(
+                    max_features=100,
+                    stop_words='english',
+                    ngram_range=(1, 2)
+                )
+                self.tfidf_matrix = self.vectorizer.fit_transform(descriptions)
+                return self.tfidf_matrix
+            
+            def extract_preferences_from_text(self, query):
+                """Extract preferences from natural language query"""
+                preferences = {}
+                cleaned_query = self.preprocess_text(query)
+                
+                # Initialize with defaults
+                preferences = {
+                    'budget': 300000,
+                    'distance': 1.0,
+                    'gender': 'Mixed',
+                    'wifi': 'Yes',
+                    'water': 'Always Available',
+                    'security': '24/7 Guard + CCTV',
+                    'room_type': 'Single',
+                    'bathroom': 'Private',
+                    'kitchen': 'Private'
+                }
+                
+                # Extract budget
+                budget_patterns = [
+                    r'(\d+)\s*(?:thousand|k)',
+                    r'(?:ugx|shs)\s*(\d+)',
+                    r'budget\s*(\d+)'
+                ]
+                for pattern in budget_patterns:
+                    match = re.search(pattern, query.lower())
+                    if match:
+                        try:
+                            budget = int(match.group(1))
+                            if budget < 1000:  # If in thousands
+                                budget = budget * 1000
+                            preferences['budget'] = budget
+                        except:
+                            pass
+                
+                # Extract distance
+                distance_patterns = [
+                    r'(\d+\.?\d*)\s*km',
+                    r'(\d+\.?\d*)\s*kilometer',
+                    r'within\s*(\d+\.?\d*)',
+                    r'near\s*(\d+\.?\d*)'
+                ]
+                for pattern in distance_patterns:
+                    match = re.search(pattern, query.lower())
+                    if match:
+                        try:
+                            preferences['distance'] = float(match.group(1))
+                        except:
+                            pass
+                
+                # Extract gender preference
+                if any(word in query.lower() for word in ['female', 'ladies', 'girls']):
+                    preferences['gender'] = 'Female Only'
+                elif any(word in query.lower() for word in ['male', 'gentlemen', 'boys']):
+                    preferences['gender'] = 'Male Only'
+                elif any(word in query.lower() for word in ['mixed', 'both']):
+                    preferences['gender'] = 'Mixed'
+                
+                # Extract room type
+                room_words = {
+                    'single': 'Single',
+                    'double': 'Double',
+                    'triple': 'Triple',
+                    'quad': 'Quad',
+                    'shared': 'Double'
+                }
+                for word, room_type in room_words.items():
+                    if word in query.lower():
+                        preferences['room_type'] = room_type
+                        break
+                
+                # Extract bathroom preference
+                if 'private' in query.lower():
+                    preferences['bathroom'] = 'Private'
+                elif 'shared' in query.lower():
+                    preferences['bathroom'] = 'Shared'
+                
+                # Extract kitchen preference
+                if 'private' in query.lower() and 'kitchen' in query.lower():
+                    preferences['kitchen'] = 'Private'
+                elif 'shared' in query.lower() and 'kitchen' in query.lower():
+                    preferences['kitchen'] = 'Shared'
+                
+                # Extract WiFi preference
+                if 'wifi' in query.lower() or 'internet' in query.lower():
+                    if 'no' in query.lower() and ('wifi' in query.lower() or 'internet' in query.lower()):
+                        preferences['wifi'] = 'No'
+                    else:
+                        preferences['wifi'] = 'Yes'
+                
+                # Extract security preference
+                if '24/7' in query.lower() or 'cctv' in query.lower():
+                    preferences['security'] = '24/7 Guard + CCTV'
+                elif 'guard' in query.lower():
+                    preferences['security'] = 'Security Guard'
+                elif 'gated' in query.lower():
+                    preferences['security'] = 'Gated Only'
+                
+                # Extract water preference
+                if 'always' in query.lower() and 'water' in query.lower():
+                    preferences['water'] = 'Always Available'
+                elif 'irregular' in query.lower() and 'water' in query.lower():
+                    preferences['water'] = 'Irregular'
+                
+                return preferences
+            
+            def get_semantic_similarity(self, query, top_n=5):
+                """Get semantic similarity between query and hostels"""
+                if self.vectorizer is None or self.tfidf_matrix is None:
+                    return None, None
+                
+                # Preprocess query
+                cleaned_query = self.preprocess_text(query)
+                
+                # Transform query
+                query_vector = self.vectorizer.transform([cleaned_query])
+                
+                # Calculate similarity
+                similarities = cosine_similarity(query_vector, self.tfidf_matrix)[0]
+                
+                # Get top matches
+                top_indices = np.argsort(similarities)[::-1][:top_n]
+                
+                return top_indices, similarities[top_indices]
+    except:
+        # Fallback to simple processor if NLTK fails
+        class HostelNLP(SimpleTextProcessor):
+            def __init__(self):
+                super().__init__()
+                self.vectorizer = None
+                self.hostel_descriptions = None
+                self.tfidf_matrix = None
+            
+            def build_corpus(self, df):
+                """Build corpus from hostel features"""
+                descriptions = []
+                for _, row in df.iterrows():
+                    desc = []
+                    desc.append(f"hostel {row.get('Hostel', '')}")
+                    desc.append(f"budget {row.get('Budget (UGX/sem)', '')}")
+                    for col in ['Gender', 'WiFi', 'Water', 'Security', 'Room Type', 'Bathroom', 'Kitchen']:
+                        if col in row:
+                            desc.append(str(row[col]).lower())
+                    descriptions.append(' '.join(desc))
+                self.hostel_descriptions = descriptions
+                return descriptions
+            
+            def fit_vectorizer(self, descriptions):
+                """Fit TF-IDF vectorizer"""
+                self.vectorizer = TfidfVectorizer(max_features=100, ngram_range=(1, 2))
+                self.tfidf_matrix = self.vectorizer.fit_transform(descriptions)
+                return self.tfidf_matrix
+            
+            def extract_preferences_from_text(self, query):
+                """Simple preference extraction"""
+                preferences = {
+                    'budget': 300000,
+                    'distance': 1.0,
+                    'gender': 'Mixed',
+                    'wifi': 'Yes',
+                    'water': 'Always Available',
+                    'security': '24/7 Guard + CCTV',
+                    'room_type': 'Single',
+                    'bathroom': 'Private',
+                    'kitchen': 'Private'
+                }
+                
+                # Extract budget
+                match = re.search(r'(\d+)\s*(?:thousand|k)', query.lower())
+                if match:
+                    try:
+                        budget = int(match.group(1)) * 1000
+                        preferences['budget'] = budget
+                    except:
+                        pass
+                
+                # Extract distance
+                match = re.search(r'(\d+\.?\d*)\s*km', query.lower())
+                if match:
+                    try:
+                        preferences['distance'] = float(match.group(1))
+                    except:
+                        pass
+                
+                # Simple keyword matching
+                if 'female' in query.lower() or 'ladies' in query.lower():
+                    preferences['gender'] = 'Female Only'
+                elif 'male' in query.lower() or 'gentlemen' in query.lower():
+                    preferences['gender'] = 'Male Only'
+                
+                if 'single' in query.lower():
+                    preferences['room_type'] = 'Single'
+                elif 'double' in query.lower():
+                    preferences['room_type'] = 'Double'
+                
+                if 'private' in query.lower() and 'bathroom' in query.lower():
+                    preferences['bathroom'] = 'Private'
+                
+                if 'wifi' in query.lower() or 'internet' in query.lower():
+                    preferences['wifi'] = 'Yes'
+                
+                return preferences
+            
+            def get_semantic_similarity(self, query, top_n=5):
+                """Get semantic similarity"""
+                if self.vectorizer is None or self.tfidf_matrix is None:
+                    return None, None
+                
+                cleaned_query = self.preprocess_text(query)
+                query_vector = self.vectorizer.transform([cleaned_query])
+                similarities = cosine_similarity(query_vector, self.tfidf_matrix)[0]
+                top_indices = np.argsort(similarities)[::-1][:top_n]
+                return top_indices, similarities[top_indices]
+
+else:
+    # Fallback if NLTK not available
+    class HostelNLP(SimpleTextProcessor):
+        def __init__(self):
+            super().__init__()
+            self.vectorizer = None
+            self.hostel_descriptions = None
+            self.tfidf_matrix = None
         
-        for _, row in df.iterrows():
-            desc = []
-            
-            # Create natural language description
-            desc.append(f"hostel {row.get('Hostel', '')}")
-            desc.append(f"budget {row.get('Budget (UGX/sem)', '')}")
-            desc.append(f"distance {row.get('Distance (km)', '')} km")
-            
-            # Add categorical features
-            for col in ['Gender', 'WiFi', 'Water', 'Security', 'Room Type', 'Bathroom', 'Kitchen']:
-                if col in row:
-                    desc.append(str(row[col]).lower())
-            
-            # Add room-specific descriptions
-            room_type = str(row.get('Room Type', '')).lower()
-            if 'single' in room_type:
-                desc.append('private room')
-            elif 'double' in room_type:
-                desc.append('shared room')
-            elif 'triple' in room_type:
-                desc.append('shared large room')
-            
-            # Add security descriptions
-            security = str(row.get('Security', '')).lower()
-            if '24/7' in security or 'cctv' in security:
-                desc.append('high security')
-            elif 'guard' in security:
-                desc.append('secure')
-            
-            # Add water descriptions
-            water = str(row.get('Water', '')).lower()
-            if 'always' in water:
-                desc.append('reliable water')
-            elif 'interrupted' in water:
-                desc.append('unreliable water')
-            
-            descriptions.append(' '.join(desc))
+        def build_corpus(self, df):
+            descriptions = []
+            for _, row in df.iterrows():
+                desc = []
+                desc.append(f"hostel {row.get('Hostel', '')}")
+                desc.append(f"budget {row.get('Budget (UGX/sem)', '')}")
+                for col in ['Gender', 'WiFi', 'Water', 'Security', 'Room Type', 'Bathroom', 'Kitchen']:
+                    if col in row:
+                        desc.append(str(row[col]).lower())
+                descriptions.append(' '.join(desc))
+            self.hostel_descriptions = descriptions
+            return descriptions
         
-        self.hostel_descriptions = descriptions
-        return descriptions
-    
-    def fit_vectorizer(self, descriptions):
-        """Fit TF-IDF vectorizer on hostel descriptions"""
-        self.vectorizer = TfidfVectorizer(
-            max_features=100,
-            stop_words='english',
-            ngram_range=(1, 2)
-        )
-        self.tfidf_matrix = self.vectorizer.fit_transform(descriptions)
-        return self.tfidf_matrix
-    
-    def extract_preferences_from_text(self, query):
-        """Extract preferences from natural language query"""
-        preferences = {}
-        cleaned_query = self.preprocess_text(query)
+        def fit_vectorizer(self, descriptions):
+            self.vectorizer = TfidfVectorizer(max_features=100, ngram_range=(1, 2))
+            self.tfidf_matrix = self.vectorizer.fit_transform(descriptions)
+            return self.tfidf_matrix
         
-        # Initialize with defaults
-        preferences = {
-            'budget': 300000,
-            'distance': 1.0,
-            'gender': 'Mixed',
-            'wifi': 'Yes',
-            'water': 'Always Available',
-            'security': '24/7 Guard + CCTV',
-            'room_type': 'Single',
-            'bathroom': 'Private',
-            'kitchen': 'Private'
-        }
-        
-        # Extract budget
-        budget_patterns = [
-            r'(\d+)\s*(?:thousand|k)',
-            r'(?:ugx|shs)\s*(\d+)',
-            r'budget\s*(\d+)'
-        ]
-        for pattern in budget_patterns:
-            match = re.search(pattern, query.lower())
+        def extract_preferences_from_text(self, query):
+            preferences = {
+                'budget': 300000,
+                'distance': 1.0,
+                'gender': 'Mixed',
+                'wifi': 'Yes',
+                'water': 'Always Available',
+                'security': '24/7 Guard + CCTV',
+                'room_type': 'Single',
+                'bathroom': 'Private',
+                'kitchen': 'Private'
+            }
+            
+            match = re.search(r'(\d+)\s*(?:thousand|k)', query.lower())
             if match:
                 try:
-                    budget = int(match.group(1))
-                    if budget < 1000:  # If in thousands
-                        budget = budget * 1000
+                    budget = int(match.group(1)) * 1000
                     preferences['budget'] = budget
                 except:
                     pass
-        
-        # Extract distance
-        distance_patterns = [
-            r'(\d+\.?\d*)\s*km',
-            r'(\d+\.?\d*)\s*kilometer',
-            r'within\s*(\d+\.?\d*)',
-            r'near\s*(\d+\.?\d*)'
-        ]
-        for pattern in distance_patterns:
-            match = re.search(pattern, query.lower())
+            
+            match = re.search(r'(\d+\.?\d*)\s*km', query.lower())
             if match:
                 try:
                     preferences['distance'] = float(match.group(1))
                 except:
                     pass
-        
-        # Extract gender preference
-        if any(word in query.lower() for word in ['female', 'ladies', 'girls']):
-            preferences['gender'] = 'Female Only'
-        elif any(word in query.lower() for word in ['male', 'gentlemen', 'boys']):
-            preferences['gender'] = 'Male Only'
-        elif any(word in query.lower() for word in ['mixed', 'both']):
-            preferences['gender'] = 'Mixed'
-        
-        # Extract room type
-        room_words = {
-            'single': 'Single',
-            'double': 'Double',
-            'triple': 'Triple',
-            'quad': 'Quad',
-            'shared': 'Double'
-        }
-        for word, room_type in room_words.items():
-            if word in query.lower():
-                preferences['room_type'] = room_type
-                break
-        
-        # Extract bathroom preference
-        if 'private' in query.lower():
-            preferences['bathroom'] = 'Private'
-        elif 'shared' in query.lower():
-            preferences['bathroom'] = 'Shared'
-        
-        # Extract kitchen preference
-        if 'private' in query.lower() and 'kitchen' in query.lower():
-            preferences['kitchen'] = 'Private'
-        elif 'shared' in query.lower() and 'kitchen' in query.lower():
-            preferences['kitchen'] = 'Shared'
-        
-        # Extract WiFi preference
-        if 'wifi' in query.lower() or 'internet' in query.lower():
-            if 'no' in query.lower() and ('wifi' in query.lower() or 'internet' in query.lower()):
-                preferences['wifi'] = 'No'
-            else:
+            
+            if 'female' in query.lower() or 'ladies' in query.lower():
+                preferences['gender'] = 'Female Only'
+            elif 'male' in query.lower() or 'gentlemen' in query.lower():
+                preferences['gender'] = 'Male Only'
+            
+            if 'single' in query.lower():
+                preferences['room_type'] = 'Single'
+            elif 'double' in query.lower():
+                preferences['room_type'] = 'Double'
+            
+            if 'private' in query.lower() and 'bathroom' in query.lower():
+                preferences['bathroom'] = 'Private'
+            
+            if 'wifi' in query.lower() or 'internet' in query.lower():
                 preferences['wifi'] = 'Yes'
+            
+            return preferences
         
-        # Extract security preference
-        if '24/7' in query.lower() or 'cctv' in query.lower():
-            preferences['security'] = '24/7 Guard + CCTV'
-        elif 'guard' in query.lower():
-            preferences['security'] = 'Security Guard'
-        elif 'gated' in query.lower():
-            preferences['security'] = 'Gated Only'
-        
-        # Extract water preference
-        if 'always' in query.lower() and 'water' in query.lower():
-            preferences['water'] = 'Always Available'
-        elif 'irregular' in query.lower() and 'water' in query.lower():
-            preferences['water'] = 'Irregular'
-        
-        return preferences
-    
-    def get_semantic_similarity(self, query, top_n=5):
-        """Get semantic similarity between query and hostels"""
-        if self.vectorizer is None or self.tfidf_matrix is None:
-            return None
-        
-        # Preprocess query
-        cleaned_query = self.preprocess_text(query)
-        
-        # Transform query
-        query_vector = self.vectorizer.transform([cleaned_query])
-        
-        # Calculate similarity
-        similarities = cosine_similarity(query_vector, self.tfidf_matrix)[0]
-        
-        # Get top matches
-        top_indices = np.argsort(similarities)[::-1][:top_n]
-        
-        return top_indices, similarities[top_indices]
+        def get_semantic_similarity(self, query, top_n=5):
+            if self.vectorizer is None or self.tfidf_matrix is None:
+                return None, None
+            
+            cleaned_query = self.preprocess_text(query)
+            query_vector = self.vectorizer.transform([cleaned_query])
+            similarities = cosine_similarity(query_vector, self.tfidf_matrix)[0]
+            top_indices = np.argsort(similarities)[::-1][:top_n]
+            return top_indices, similarities[top_indices]
 
 # ---------------------------------------
 # CACHE DATA LOADING
@@ -509,8 +736,13 @@ def main():
     model = load_model()
     
     # Initialize NLP
-    nlp = initialize_nlp()
-    nlp = build_nlp_corpus(df)
+    try:
+        nlp = initialize_nlp()
+        nlp = build_nlp_corpus(df)
+        nlp_available = True
+    except Exception as e:
+        st.warning(f"NLP initialization warning: {str(e)}")
+        nlp_available = False
     
     # Title
     st.title("Lira University Hostel Recommendation System")
@@ -523,46 +755,51 @@ def main():
     
     nlp_query = st.text_input("Type your hostel requirements:", placeholder="e.g., I want a single room with wifi and private bathroom near campus")
     
-    if nlp_query:
+    if nlp_query and nlp_available:
         with st.spinner("Analyzing your request with NLP..."):
-            # Extract preferences from NLP
-            nlp_preferences = nlp.extract_preferences_from_text(nlp_query)
+            try:
+                # Extract preferences from NLP
+                nlp_preferences = nlp.extract_preferences_from_text(nlp_query)
+                
+                # Get semantic similarity matches
+                semantic_indices, semantic_scores = nlp.get_semantic_similarity(nlp_query, top_n=5)
+                
+                # Display extracted preferences
+                st.markdown('<div class="nlp-highlight">', unsafe_allow_html=True)
+                st.markdown("**NLP Extracted Preferences:**")
+                col1, col2, col3 = st.columns(3)
+                with col1:
+                    st.write(f"Budget: UGX {nlp_preferences['budget']:,}")
+                    st.write(f"Distance: {nlp_preferences['distance']} km")
+                    st.write(f"Gender: {nlp_preferences['gender']}")
+                with col2:
+                    st.write(f"Room Type: {nlp_preferences['room_type']}")
+                    st.write(f"WiFi: {nlp_preferences['wifi']}")
+                    st.write(f"Water: {nlp_preferences['water']}")
+                with col3:
+                    st.write(f"Security: {nlp_preferences['security']}")
+                    st.write(f"Bathroom: {nlp_preferences['bathroom']}")
+                    st.write(f"Kitchen: {nlp_preferences['kitchen']}")
+                
+                # Show semantic matches
+                if semantic_indices is not None:
+                    st.markdown("**Semantic Matches (NLP Understanding):**")
+                    for idx, score in zip(semantic_indices, semantic_scores):
+                        hostel = df.iloc[idx]
+                        st.write(f"- {hostel['Hostel']} (Relevance: {score*100:.1f}%)")
+                st.markdown('</div>', unsafe_allow_html=True)
+                
+                # Get recommendations based on NLP preferences
+                recommendations = get_recommendations(df, model, nlp_preferences, 5)
+                
+                # Display recommendations
+                st.markdown("---")
+                st.subheader("Recommended Hostels")
+                display_recommendations(recommendations, nlp_preferences, model, nlp_query)
             
-            # Get semantic similarity matches
-            semantic_indices, semantic_scores = nlp.get_semantic_similarity(nlp_query, top_n=5)
-            
-            # Display extracted preferences
-            st.markdown('<div class="nlp-highlight">', unsafe_allow_html=True)
-            st.markdown("**NLP Extracted Preferences:**")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.write(f"Budget: UGX {nlp_preferences['budget']:,}")
-                st.write(f"Distance: {nlp_preferences['distance']} km")
-                st.write(f"Gender: {nlp_preferences['gender']}")
-            with col2:
-                st.write(f"Room Type: {nlp_preferences['room_type']}")
-                st.write(f"WiFi: {nlp_preferences['wifi']}")
-                st.write(f"Water: {nlp_preferences['water']}")
-            with col3:
-                st.write(f"Security: {nlp_preferences['security']}")
-                st.write(f"Bathroom: {nlp_preferences['bathroom']}")
-                st.write(f"Kitchen: {nlp_preferences['kitchen']}")
-            
-            # Show semantic matches
-            if semantic_indices is not None:
-                st.markdown("**Semantic Matches (NLP Understanding):**")
-                for idx, score in zip(semantic_indices, semantic_scores):
-                    hostel = df.iloc[idx]
-                    st.write(f"- {hostel['Hostel']} (Relevance: {score*100:.1f}%)")
-            st.markdown('</div>', unsafe_allow_html=True)
-            
-            # Get recommendations based on NLP preferences
-            recommendations = get_recommendations(df, model, nlp_preferences, 5)
-            
-            # Display recommendations
-            st.markdown("---")
-            st.subheader("Recommended Hostels")
-            display_recommendations(recommendations, nlp_preferences, model, nlp_query)
+            except Exception as e:
+                st.error(f"NLP processing error: {str(e)}")
+                st.info("Please try using the structured preferences in the sidebar instead.")
     
     st.markdown("---")
     
@@ -709,190 +946,4 @@ def display_recommendations(recommendations, preferences, model, nlp_query=None)
         <div class="card">
             <h3>{top_hostel['Hostel']}</h3>
             <p><strong>Overall Match:</strong> {top_hostel['Overall']:.1f}%</p>
-            <div class="score-bar">
-                <div class="score-bar-fill" style="width: {top_hostel['Overall']:.1f}%;"></div>
-            </div>
-            <p><strong>Budget:</strong> UGX {int(top_hostel['Budget (UGX/sem)']):,} | <strong>Distance:</strong> {top_hostel['Distance (km)']} km</p>
-            <div style="margin: 10px 0;">
-                <span class="badge">WiFi: {top_hostel['WiFi']}</span>
-                <span class="badge">Water: {top_hostel['Water']}</span>
-                <span class="badge">Security: {top_hostel['Security']}</span>
-                <span class="badge">Room: {top_hostel['Room Type']}</span>
-                <span class="badge">Bathroom: {top_hostel['Bathroom']}</span>
-                <span class="badge">Kitchen: {top_hostel['Kitchen']}</span>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # AI recommendation message
-        if ai_score >= 4.5:
-            st.success("Excellent match for your preferences. Highly recommended.")
-        elif ai_score >= 3.5:
-            st.info("Good match for your preferences. Recommended.")
-        elif ai_score >= 2.5:
-            st.warning("Moderate match. Consider adjusting your preferences.")
-        else:
-            st.error("Low match. Please adjust your preferences for better results.")
-    
-    with col2:
-        # Match breakdown
-        st.markdown('<div class="card">', unsafe_allow_html=True)
-        st.subheader("Match Breakdown")
-        
-        match_data = {
-            'Overall Match': top_hostel['Overall'],
-            'Budget': top_hostel['Budget'],
-            'Facilities': top_hostel['Facilities'],
-            'Distance': top_hostel['Distance']
-        }
-        
-        for key, value in match_data.items():
-            color = '#28a745' if value >= 70 else '#ffc107' if value >= 50 else '#dc3545'
-            st.markdown(f"""
-            <div>
-                <div style="display: flex; justify-content: space-between;">
-                    <span>{key}</span>
-                    <span style="color: {color}; font-weight: bold;">{value:.1f}%</span>
-                </div>
-                <div class="score-bar">
-                    <div class="score-bar-fill" style="width: {value:.1f}%; background: {color};"></div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    # Alternative recommendations
-    if len(recommendations) > 1:
-        st.markdown("---")
-        st.subheader("Alternative Recommendations")
-        
-        cols = st.columns(min(3, len(recommendations) - 1))
-        for idx, (_, hostel) in enumerate(recommendations.iloc[1:].iterrows()):
-            if idx < 3:
-                with cols[idx]:
-                    st.markdown(f"""
-                    <div class="card" style="padding: 15px;">
-                        <h4 style="color: #003366; margin: 0;">{hostel['Hostel']}</h4>
-                        <p style="margin: 5px 0;">
-                            <strong>Match:</strong> {hostel['Overall']:.1f}%
-                        </p>
-                        <div class="score-bar">
-                            <div class="score-bar-fill" style="width: {hostel['Overall']:.1f}%;"></div>
-                        </div>
-                        <p style="font-size: 14px; margin: 5px 0;">
-                            UGX {int(hostel['Budget (UGX/sem)']):,} | {hostel['Distance (km)']} km
-                        </p>
-                        <div>
-                            <span class="badge">{hostel['Room Type']}</span>
-                            <span class="badge">{hostel['Bathroom']}</span>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-    
-    # Show all recommendations
-    with st.expander("View All Recommendations"):
-        display_cols = ['Hostel', 'Budget (UGX/sem)', 'Distance (km)', 
-                       'Budget', 'Facilities', 'Distance', 'Overall']
-        display_cols = [col for col in display_cols if col in recommendations.columns]
-        
-        display_df = recommendations[display_cols].copy()
-        display_df['Budget (UGX/sem)'] = display_df['Budget (UGX/sem)'].apply(lambda x: f"UGX {int(x):,}")
-        
-        display_df.columns = ['Hostel', 'Budget', 'Distance', 
-                             'Budget %', 'Facilities %', 'Distance %', 'Overall %']
-        
-        st.dataframe(
-            display_df,
-            use_container_width=True,
-            hide_index=True
-        )
-
-def display_overview(df):
-    """Display overview when no search is performed"""
-    st.markdown("---")
-    
-    # Statistics
-    col1, col2, col3 = st.columns(3)
-    
-    with col1:
-        st.markdown(f"""
-        <div class="metric-card">
-            <h2 style="margin: 0;">{len(df)}</h2>
-            <p style="color: #666;">Available Hostels</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col2:
-        avg_budget = df['Budget (UGX/sem)'].mean()
-        st.markdown(f"""
-        <div class="metric-card">
-            <h2 style="margin: 0;">UGX {int(avg_budget):,}</h2>
-            <p style="color: #666;">Average Budget</p>
-        </div>
-        """, unsafe_allow_html=True)
-    
-    with col3:
-        if 'Room Type' in df.columns:
-            top_room = df['Room Type'].value_counts().index[0]
-            st.markdown(f"""
-            <div class="metric-card">
-                <h2 style="margin: 0;">{top_room}</h2>
-                <p style="color: #666;">Most Common Room Type</p>
-            </div>
-            """, unsafe_allow_html=True)
-    
-    # Browse hostels
-    with st.expander("Browse Available Hostels"):
-        # Filters
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            gender_filter = st.selectbox("Gender", ["All"] + list(df['Gender'].unique()))
-        with col2:
-            if 'Room Type' in df.columns:
-                room_filter = st.selectbox("Room Type", ["All"] + list(df['Room Type'].unique()))
-        with col3:
-            if 'WiFi' in df.columns:
-                wifi_filter = st.selectbox("WiFi", ["All"] + list(df['WiFi'].unique()))
-        
-        # Apply filters
-        filtered = df.copy()
-        if gender_filter != "All":
-            filtered = filtered[filtered['Gender'] == gender_filter]
-        if room_filter != "All":
-            filtered = filtered[filtered['Room Type'] == room_filter]
-        if wifi_filter != "All":
-            filtered = filtered[filtered['WiFi'] == wifi_filter]
-        
-        st.dataframe(
-            filtered,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Budget (UGX/sem)": st.column_config.NumberColumn("Budget (UGX)", format="UGX %d")
-            }
-        )
-    
-    # NLP examples
-    with st.expander("Try NLP Search Examples"):
-        st.markdown("""
-        Try typing these examples in the NLP search box:
-        - "I need a single room with wifi and private bathroom near campus"
-        - "Looking for a hostel with 24/7 security and reliable water supply"
-        - "Budget 250k for a double room with shared kitchen"
-        - "Female only hostel within 1km with good security"
-        - "Mixed hostel with wifi and water always available"
-        """)
-
-# ---------------------------------------
-# FOOTER
-# ---------------------------------------
-st.markdown("""
-<div class="footer">
-Lira University Hostel Recommendation System<br>
-Powered by AI | NLP | Machine Learning | Smart Matching
-</div>
-""", unsafe_allow_html=True)
-
-if __name__ == "__main__":
-    main()
+            <div
