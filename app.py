@@ -111,7 +111,7 @@ unsafe_allow_html=True
 # ---------------------------------------
 
 st.title(
-"🏠 Lira University Hostel Recommendation AI"
+" Lira University[LU] Hostel Recommendation AI"
 )
 
 
