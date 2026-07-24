@@ -3,7 +3,6 @@ import pandas as pd
 import numpy as np
 import joblib
 import re
-import time
 from datetime import datetime
 import warnings
 warnings.filterwarnings('ignore')
@@ -56,11 +55,6 @@ st.markdown("""
     color: #999;
     margin-top: 4px;
 }
-.input-area {
-    display: flex;
-    gap: 10px;
-    padding: 10px 0;
-}
 .card {
     background: white;
     padding: 20px;
@@ -97,7 +91,9 @@ st.markdown("""
     display: inline-block;
     margin: 4px;
     font-size: 14px;
-    transition: all 0.3s ease;
+    text-align: center;
+    width: 100%;
+    border: none;
 }
 .suggestion-chip:hover {
     background: #003366;
@@ -149,230 +145,7 @@ def load_model():
         return None
 
 # ---------------------------------------
-# CHATBOT CLASS
-# ---------------------------------------
-class HostelChatbot:
-    def __init__(self, df, model):
-        self.df = df
-        self.model = model
-        self.context = {}
-        self.preferences = {}
-        self.conversation_history = []
-        self.required_preferences = ['budget', 'gender', 'distance', 'wifi', 'water', 'security', 'room_type']
-        
-    def reset(self):
-        """Reset chatbot state"""
-        self.context = {}
-        self.preferences = {}
-        self.conversation_history = []
-    
-    def extract_preferences_from_text(self, text):
-        """Extract preferences from user text"""
-        text_lower = text.lower()
-        extracted = {}
-        
-        # Extract budget
-        budget_patterns = [
-            r'(\d+)\s*(?:thousand|k)',
-            r'(?:ugx|shs)\s*(\d+)',
-            r'budget\s*(\d+)',
-            r'(\d+)\s*(?:million|m)'
-        ]
-        for pattern in budget_patterns:
-            match = re.search(pattern, text_lower)
-            if match:
-                try:
-                    budget = int(match.group(1))
-                    if 'million' in text_lower or 'm' in text_lower:
-                        budget = budget * 1000000
-                    elif budget < 1000:
-                        budget = budget * 1000
-                    extracted['budget'] = budget
-                except:
-                    pass
-        
-        # Extract distance
-        distance_patterns = [
-            r'(\d+\.?\d*)\s*km',
-            r'(\d+\.?\d*)\s*kilometer',
-            r'within\s*(\d+\.?\d*)',
-            r'near\s*(\d+\.?\d*)'
-        ]
-        for pattern in distance_patterns:
-            match = re.search(pattern, text_lower)
-            if match:
-                try:
-                    extracted['distance'] = float(match.group(1))
-                except:
-                    pass
-        
-        # Extract gender
-        if any(word in text_lower for word in ['female', 'ladies', 'girls', 'women']):
-            extracted['gender'] = 'Female Only'
-        elif any(word in text_lower for word in ['male', 'gentlemen', 'boys', 'men']):
-            extracted['gender'] = 'Male Only'
-        elif any(word in text_lower for word in ['mixed', 'both', 'co-ed']):
-            extracted['gender'] = 'Mixed'
-        
-        # Extract room type
-        room_words = {
-            'single': 'Single',
-            'double': 'Double',
-            'triple': 'Triple',
-            'quad': 'Quad'
-        }
-        for word, room_type in room_words.items():
-            if word in text_lower:
-                extracted['room_type'] = room_type
-                break
-        
-        # Extract bathroom
-        if 'private' in text_lower and ('bathroom' in text_lower or 'toilet' in text_lower):
-            extracted['bathroom'] = 'Private'
-        elif 'shared' in text_lower and ('bathroom' in text_lower or 'toilet' in text_lower):
-            extracted['bathroom'] = 'Shared'
-        
-        # Extract kitchen
-        if 'private' in text_lower and 'kitchen' in text_lower:
-            extracted['kitchen'] = 'Private'
-        elif 'shared' in text_lower and 'kitchen' in text_lower:
-            extracted['kitchen'] = 'Shared'
-        
-        # Extract WiFi
-        if 'wifi' in text_lower or 'internet' in text_lower:
-            if 'no' in text_lower and ('wifi' in text_lower or 'internet' in text_lower):
-                extracted['wifi'] = 'No'
-            else:
-                extracted['wifi'] = 'Yes'
-        
-        # Extract security
-        if '24/7' in text_lower or 'cctv' in text_lower:
-            extracted['security'] = '24/7 Guard + CCTV'
-        elif 'guard' in text_lower:
-            extracted['security'] = 'Security Guard'
-        elif 'gated' in text_lower:
-            extracted['security'] = 'Gated Only'
-        
-        # Extract water
-        if 'always' in text_lower and 'water' in text_lower:
-            extracted['water'] = 'Always Available'
-        elif 'irregular' in text_lower and 'water' in text_lower:
-            extracted['water'] = 'Irregular'
-        
-        return extracted
-    
-    def get_missing_preferences(self):
-        """Get list of missing preferences"""
-        missing = []
-        for pref in self.required_preferences:
-            if pref not in self.preferences:
-                missing.append(pref)
-        return missing
-    
-    def get_next_question(self):
-        """Get next question to ask user"""
-        missing = self.get_missing_preferences()
-        
-        if not missing:
-            return None
-        
-        question_map = {
-            'budget': "What is your budget per semester in UGX? (e.g., 300000)",
-            'gender': "Which gender preference do you have? (Mixed, Female Only, Male Only)",
-            'distance': "What is the maximum distance from campus in km? (e.g., 1.0)",
-            'wifi': "Do you need WiFi? (Yes/No)",
-            'water': "What water availability do you prefer? (Always Available, Sometimes Interrupted, Irregular)",
-            'security': "What security level do you prefer? (24/7 Guard + CCTV, Security Guard, Gated Only, Basic)",
-            'room_type': "What room type do you prefer? (Single, Double, Triple, Quad)",
-            'bathroom': "Do you prefer private or shared bathroom?",
-            'kitchen': "Do you prefer private or shared kitchen?"
-        }
-        
-        next_pref = missing[0]
-        return question_map.get(next_pref, f"Please tell me your {next_pref} preference.")
-    
-    def update_preferences(self, user_input):
-        """Update preferences from user input"""
-        extracted = self.extract_preferences_from_text(user_input)
-        
-        # Update preferences with extracted values
-        for key, value in extracted.items():
-            if key in self.required_preferences:
-                self.preferences[key] = value
-        
-        # Try to parse budget if not extracted
-        if 'budget' not in self.preferences:
-            try:
-                numbers = re.findall(r'\d+', user_input)
-                if numbers:
-                    budget = int(numbers[0])
-                    if budget < 1000:
-                        budget = budget * 1000
-                    self.preferences['budget'] = budget
-            except:
-                pass
-        
-        # Try to parse distance if not extracted
-        if 'distance' not in self.preferences:
-            try:
-                numbers = re.findall(r'\d+\.?\d*', user_input)
-                if numbers:
-                    dist = float(numbers[0])
-                    if dist > 0 and dist <= 10:
-                        self.preferences['distance'] = dist
-            except:
-                pass
-        
-        return extracted
-    
-    def get_recommendations(self):
-        """Get recommendations based on current preferences"""
-        if len(self.preferences) < len(self.required_preferences):
-            return None
-        
-        # Use the get_recommendations function
-        return get_recommendations(self.df, self.model, self.preferences)
-    
-    def format_recommendation_message(self, recommendations):
-        """Format recommendations for display"""
-        if recommendations is None or len(recommendations) == 0:
-            return "I couldn't find any hostels matching your preferences. Could you adjust your requirements?"
-        
-        top_hostel = recommendations.iloc[0]
-        
-        # Get AI score
-        if self.model is not None and 'AI_Score' in top_hostel:
-            ai_score = top_hostel['AI_Score']
-        else:
-            ai_score = top_hostel.get('Final_Score', 3) * 5 / 20
-        
-        message = f"""
-        Based on your preferences, I recommend:
-
-        🏠 **{top_hostel['Hostel']}**
-        - AI Score: {ai_score:.1f}/5
-        - Budget: UGX {int(top_hostel['Budget (UGX/sem)']):,}
-        - Distance: {top_hostel['Distance (km)']} km from campus
-        - WiFi: {top_hostel['WiFi']}
-        - Water: {top_hostel['Water']}
-        - Security: {top_hostel['Security']}
-        - Room Type: {top_hostel['Room Type']}
-        - Bathroom: {top_hostel['Bathroom']}
-        - Kitchen: {top_hostel['Kitchen']}
-        """
-        
-        if len(recommendations) > 1:
-            message += "\n\n**Alternatives:**\n"
-            for i in range(1, min(3, len(recommendations))):
-                hostel = recommendations.iloc[i]
-                message += f"- {hostel['Hostel']} (UGX {int(hostel['Budget (UGX/sem)']):,}, {hostel['Distance (km)']} km)\n"
-        
-        message += "\n\nWould you like to adjust any preferences or get more details?"
-        
-        return message
-
-# ---------------------------------------
-# HELPER FUNCTIONS
+# HELPER FUNCTIONS - MATCHING ORIGINAL MODEL
 # ---------------------------------------
 def get_match_scores(hostel, preferences):
     """Calculate match scores for a hostel"""
@@ -420,7 +193,8 @@ def get_match_scores(hostel, preferences):
     return scores
 
 def get_recommendations(df, model, preferences, n=5):
-    """Get recommendations using the trained model"""
+    """Get recommendations using the trained model - SAME AS ORIGINAL APP"""
+    # Start with all data
     filtered = df.copy()
     
     # Apply basic filters
@@ -442,6 +216,7 @@ def get_recommendations(df, model, preferences, n=5):
         try:
             ai_scores = []
             for _, row in filtered.iterrows():
+                # Prepare input exactly like original app
                 input_data = {
                     "Hostel": [row['Hostel']],
                     "Budget (UGX/sem)": [row['Budget (UGX/sem)']],
@@ -455,13 +230,17 @@ def get_recommendations(df, model, preferences, n=5):
                     "Kitchen": [row['Kitchen']]
                 }
                 input_df = pd.DataFrame(input_data)
+                
+                # Predict using model
                 score = model.predict(input_df)[0]
                 ai_scores.append(score)
             
             filtered['AI_Score'] = ai_scores
             
         except Exception as e:
-            filtered['AI_Score'] = 1 - abs(filtered['Budget (UGX/sem)'] - preferences['budget']) / 1000000
+            st.warning(f"Model prediction issue: {str(e)}")
+            # Fallback
+            filtered['AI_Score'] = 3.0  # Default score
     
     # Calculate match scores
     match_scores = []
@@ -472,8 +251,9 @@ def get_recommendations(df, model, preferences, n=5):
     match_df = pd.DataFrame(match_scores)
     filtered = pd.concat([filtered.reset_index(drop=True), match_df], axis=1)
     
-    # Calculate final score
+    # Calculate final score - SAME AS ORIGINAL APP
     if 'AI_Score' in filtered.columns:
+        # Normalize AI score
         ai_max = filtered['AI_Score'].max()
         ai_min = filtered['AI_Score'].min()
         if ai_max > ai_min:
@@ -481,6 +261,7 @@ def get_recommendations(df, model, preferences, n=5):
         else:
             filtered['AI_Percentage'] = 50
         
+        # Final score: 60% AI, 40% match
         filtered['Final_Score'] = (
             filtered['AI_Percentage'] * 0.6 + 
             filtered['Overall'] * 0.4
@@ -488,35 +269,243 @@ def get_recommendations(df, model, preferences, n=5):
     else:
         filtered['Final_Score'] = filtered['Overall']
     
+    # Sort by final score
     filtered = filtered.sort_values('Final_Score', ascending=False)
     
     return filtered.head(n)
 
-def display_hostel_card(hostel, ai_score=None):
-    """Display a hostel as a card"""
-    if ai_score is None and 'AI_Score' in hostel:
-        ai_score = hostel['AI_Score']
-    elif ai_score is None:
-        ai_score = hostel.get('Final_Score', 3) * 5 / 20
+# ---------------------------------------
+# CHATBOT CLASS
+# ---------------------------------------
+class HostelChatbot:
+    def __init__(self, df, model):
+        self.df = df
+        self.model = model
+        self.preferences = {}
+        self.step = 0
+        self.questions = [
+            "What is your budget per semester in UGX? (e.g., 300000)",
+            "Which gender preference do you have? (Mixed, Female Only, Male Only)",
+            "What is the maximum distance from campus in km? (e.g., 1.0)",
+            "Do you need WiFi? (Yes/No)",
+            "What water availability do you prefer? (Always Available, Sometimes Interrupted, Irregular)",
+            "What security level do you prefer? (24/7 Guard + CCTV, Security Guard, Gated Only, Basic)",
+            "What room type do you prefer? (Single, Double, Triple, Quad)",
+            "Do you prefer private or shared bathroom?",
+            "Do you prefer private or shared kitchen?"
+        ]
+        self.preference_keys = [
+            'budget', 'gender', 'distance', 'wifi', 
+            'water', 'security', 'room_type', 'bathroom', 'kitchen'
+        ]
+        self.complete = False
+        
+    def reset(self):
+        """Reset chatbot state"""
+        self.preferences = {}
+        self.step = 0
+        self.complete = False
     
-    st.markdown(f"""
-    <div class="card">
-        <h3 style="color: #003366; margin: 0;">{hostel['Hostel']}</h3>
-        <p><strong>AI Score:</strong> {ai_score:.1f}/5</p>
-        <div class="score-bar">
-            <div class="score-bar-fill" style="width: {ai_score/5*100:.1f}%;"></div>
-        </div>
-        <p><strong>Budget:</strong> UGX {int(hostel['Budget (UGX/sem)']):,} | <strong>Distance:</strong> {hostel['Distance (km)']} km</p>
-        <div style="margin: 10px 0;">
-            <span class="badge">WiFi: {hostel['WiFi']}</span>
-            <span class="badge">Water: {hostel['Water']}</span>
-            <span class="badge">Security: {hostel['Security']}</span>
-            <span class="badge">Room: {hostel['Room Type']}</span>
-            <span class="badge">Bathroom: {hostel['Bathroom']}</span>
-            <span class="badge">Kitchen: {hostel['Kitchen']}</span>
-        </div>
-    </div>
-    """, unsafe_allow_html=True)
+    def get_next_question(self):
+        """Get the next question to ask"""
+        if self.step < len(self.questions):
+            return self.questions[self.step]
+        return None
+    
+    def process_response(self, user_input):
+        """Process user response and update preferences"""
+        if self.step >= len(self.preference_keys):
+            return None
+        
+        # Get current preference key
+        key = self.preference_keys[self.step]
+        
+        # Extract value based on key type
+        value = self._extract_value(key, user_input)
+        
+        if value is not None:
+            self.preferences[key] = value
+            self.step += 1
+            
+            # Check if complete
+            if self.step >= len(self.preference_keys):
+                self.complete = True
+                return self.get_recommendations()
+            
+            return self.get_next_question()
+        else:
+            # Could not extract, ask again
+            return f"I couldn't understand. Please tell me: {self.questions[self.step]}"
+    
+    def _extract_value(self, key, text):
+        """Extract value for a specific preference key"""
+        text_lower = text.lower()
+        
+        if key == 'budget':
+            # Extract budget
+            patterns = [
+                r'(\d+)\s*(?:thousand|k)',
+                r'(?:ugx|shs)\s*(\d+)',
+                r'budget\s*(\d+)',
+                r'(\d+)\s*(?:million|m)'
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, text_lower)
+                if match:
+                    try:
+                        budget = int(match.group(1))
+                        if 'million' in text_lower or 'm' in text_lower:
+                            budget = budget * 1000000
+                        elif budget < 1000:
+                            budget = budget * 1000
+                        return budget
+                    except:
+                        pass
+            
+            # Try direct number
+            numbers = re.findall(r'\d+', text)
+            if numbers:
+                try:
+                    budget = int(numbers[0])
+                    if budget < 1000:
+                        budget = budget * 1000
+                    return budget
+                except:
+                    pass
+            return None
+        
+        elif key == 'gender':
+            if 'female' in text_lower or 'ladies' in text_lower:
+                return 'Female Only'
+            elif 'male' in text_lower or 'gentlemen' in text_lower:
+                return 'Male Only'
+            elif 'mixed' in text_lower or 'both' in text_lower:
+                return 'Mixed'
+            return None
+        
+        elif key == 'distance':
+            patterns = [
+                r'(\d+\.?\d*)\s*km',
+                r'(\d+\.?\d*)\s*kilometer',
+                r'within\s*(\d+\.?\d*)',
+                r'near\s*(\d+\.?\d*)'
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, text_lower)
+                if match:
+                    try:
+                        return float(match.group(1))
+                    except:
+                        pass
+            
+            # Try direct number
+            numbers = re.findall(r'\d+\.?\d*', text)
+            if numbers:
+                try:
+                    dist = float(numbers[0])
+                    if 0 < dist <= 10:
+                        return dist
+                except:
+                    pass
+            return None
+        
+        elif key == 'wifi':
+            if 'yes' in text_lower or 'wifi' in text_lower:
+                return 'Yes'
+            elif 'no' in text_lower:
+                return 'No'
+            return None
+        
+        elif key == 'water':
+            if 'always' in text_lower:
+                return 'Always Available'
+            elif 'sometimes' in text_lower or 'interrupted' in text_lower:
+                return 'Sometimes Interrupted'
+            elif 'irregular' in text_lower:
+                return 'Irregular'
+            return None
+        
+        elif key == 'security':
+            if '24/7' in text_lower or 'cctv' in text_lower:
+                return '24/7 Guard + CCTV'
+            elif 'guard' in text_lower:
+                return 'Security Guard'
+            elif 'gated' in text_lower:
+                return 'Gated Only'
+            elif 'basic' in text_lower:
+                return 'Basic'
+            return None
+        
+        elif key == 'room_type':
+            if 'single' in text_lower:
+                return 'Single'
+            elif 'double' in text_lower:
+                return 'Double'
+            elif 'triple' in text_lower:
+                return 'Triple'
+            elif 'quad' in text_lower:
+                return 'Quad'
+            return None
+        
+        elif key == 'bathroom':
+            if 'private' in text_lower:
+                return 'Private'
+            elif 'shared' in text_lower:
+                return 'Shared'
+            return None
+        
+        elif key == 'kitchen':
+            if 'private' in text_lower:
+                return 'Private'
+            elif 'shared' in text_lower:
+                return 'Shared'
+            return None
+        
+        return None
+    
+    def get_recommendations(self):
+        """Get recommendations based on current preferences"""
+        if len(self.preferences) < len(self.preference_keys):
+            return None
+        
+        return get_recommendations(self.df, self.model, self.preferences)
+    
+    def format_recommendation_message(self, recommendations):
+        """Format recommendations for display"""
+        if recommendations is None or len(recommendations) == 0:
+            return "I couldn't find any hostels matching your preferences. Let's start over."
+        
+        # Get AI score for top hostel
+        top_hostel = recommendations.iloc[0]
+        
+        if self.model is not None and 'AI_Score' in top_hostel:
+            ai_score = top_hostel['AI_Score']
+        else:
+            ai_score = top_hostel.get('Final_Score', 3) * 5 / 20
+        
+        # Build message
+        message = f"✅ **Great! Based on your preferences, here are my recommendations:**\n\n"
+        message += f"🏆 **Top Pick: {top_hostel['Hostel']}**\n"
+        message += f"   • AI Score: {ai_score:.1f}/5\n"
+        message += f"   • Budget: UGX {int(top_hostel['Budget (UGX/sem)']):,}\n"
+        message += f"   • Distance: {top_hostel['Distance (km)']} km from campus\n"
+        message += f"   • WiFi: {top_hostel['WiFi']}\n"
+        message += f"   • Water: {top_hostel['Water']}\n"
+        message += f"   • Security: {top_hostel['Security']}\n"
+        message += f"   • Room Type: {top_hostel['Room Type']}\n"
+        message += f"   • Bathroom: {top_hostel['Bathroom']}\n"
+        message += f"   • Kitchen: {top_hostel['Kitchen']}\n\n"
+        
+        if len(recommendations) > 1:
+            message += "**Alternatives:**\n"
+            for i in range(1, min(4, len(recommendations))):
+                hostel = recommendations.iloc[i]
+                alt_score = hostel.get('AI_Score', 3)
+                message += f"• {hostel['Hostel']} (Score: {alt_score:.1f}/5, UGX {int(hostel['Budget (UGX/sem)']):,})\n"
+        
+        message += "\nYou can click 'Show Recommendations' below to see detailed cards or click 'Start Over' to try different preferences."
+        
+        return message
 
 # ---------------------------------------
 # MAIN APP
@@ -534,13 +523,12 @@ def main():
     if 'chatbot' not in st.session_state:
         st.session_state.chatbot = HostelChatbot(df, model)
         st.session_state.messages = []
-        st.session_state.show_recommendations = False
         st.session_state.recommendations = None
-        st.session_state.chat_complete = False
+        st.session_state.show_recommendations = False
         
         # Add welcome message
-        welcome_msg = "Hello! I'm your hostel assistant. I'll help you find the perfect hostel based on your preferences.\n\nWhat type of hostel are you looking for? (e.g., 'Single room with wifi, budget 300k near campus')"
-        st.session_state.messages.append({"role": "assistant", "content": welcome_msg})
+        welcome = "👋 Hello! I'm your hostel assistant. I'll help you find the perfect hostel at Lira University.\n\nI'll ask you a few questions about your preferences and then recommend the best hostels for you.\n\nLet's start! What is your budget per semester in UGX? (e.g., 300000)"
+        st.session_state.messages.append({"role": "assistant", "content": welcome})
     
     # Title
     st.title("Hostel AI Assistant")
@@ -572,187 +560,129 @@ def main():
         
         # Show recommendations if available
         if st.session_state.show_recommendations and st.session_state.recommendations is not None:
-            st.markdown("### Top Recommendations")
+            st.markdown("---")
+            st.subheader("Top Recommendations")
+            
             recommendations = st.session_state.recommendations
             
-            # Display top 3 recommendations
+            # Display top 3 as cards
             for i in range(min(3, len(recommendations))):
                 hostel = recommendations.iloc[i]
                 if i == 0:
                     st.success("🏆 Best Match")
-                display_hostel_card(hostel)
+                
+                ai_score = hostel.get('AI_Score', 3)
+                
+                st.markdown(f"""
+                <div class="card">
+                    <h3 style="color: #003366; margin: 0;">{hostel['Hostel']}</h3>
+                    <p><strong>AI Score:</strong> {ai_score:.1f}/5</p>
+                    <div class="score-bar">
+                        <div class="score-bar-fill" style="width: {ai_score/5*100:.1f}%;"></div>
+                    </div>
+                    <p><strong>Budget:</strong> UGX {int(hostel['Budget (UGX/sem)']):,} | <strong>Distance:</strong> {hostel['Distance (km)']} km</p>
+                    <div style="margin: 10px 0;">
+                        <span class="badge">WiFi: {hostel['WiFi']}</span>
+                        <span class="badge">Water: {hostel['Water']}</span>
+                        <span class="badge">Security: {hostel['Security']}</span>
+                        <span class="badge">Room: {hostel['Room Type']}</span>
+                        <span class="badge">Bathroom: {hostel['Bathroom']}</span>
+                        <span class="badge">Kitchen: {hostel['Kitchen']}</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
             
-            # Show all recommendations in expander
-            with st.expander("View all recommendations"):
-                for i, (_, hostel) in enumerate(recommendations.iterrows()):
-                    st.write(f"**{i+1}. {hostel['Hostel']}**")
-                    st.write(f"   Budget: UGX {int(hostel['Budget (UGX/sem)']):,} | Distance: {hostel['Distance (km)']} km | AI Score: {hostel.get('AI_Score', 3):.1f}/5")
-                    if i < len(recommendations) - 1:
-                        st.divider()
-            
-            # Buttons for next actions
-            col1, col2, col3 = st.columns(3)
+            # Action buttons
+            col1, col2 = st.columns(2)
             with col1:
-                if st.button("Refine Search", use_container_width=True):
+                if st.button("🔄 Start Over", use_container_width=True):
                     st.session_state.chatbot.reset()
                     st.session_state.messages = []
-                    st.session_state.show_recommendations = False
                     st.session_state.recommendations = None
-                    st.session_state.chat_complete = False
-                    welcome_msg = "Let's refine your search. What would you like to change?"
-                    st.session_state.messages.append({"role": "assistant", "content": welcome_msg})
+                    st.session_state.show_recommendations = False
+                    welcome = "👋 Let's start over! What is your budget per semester in UGX? (e.g., 300000)"
+                    st.session_state.messages.append({"role": "assistant", "content": welcome})
                     st.rerun()
             
             with col2:
-                if st.button("Show All Hostels", use_container_width=True):
+                if st.button("📋 Show All Hostels", use_container_width=True):
                     st.session_state.show_all = True
             
-            with col3:
-                if st.button("New Search", use_container_width=True):
-                    st.session_state.chatbot.reset()
-                    st.session_state.messages = []
-                    st.session_state.show_recommendations = False
-                    st.session_state.recommendations = None
-                    st.session_state.chat_complete = False
-                    welcome_msg = "Starting a new search! Tell me what you're looking for."
-                    st.session_state.messages.append({"role": "assistant", "content": welcome_msg})
+            # Show all hostels if requested
+            if 'show_all' in st.session_state and st.session_state.show_all:
+                st.markdown("---")
+                st.subheader("All Available Hostels")
+                st.dataframe(
+                    df,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Budget (UGX/sem)": st.column_config.NumberColumn("Budget (UGX)", format="UGX %d")
+                    }
+                )
+                if st.button("Hide All Hostels"):
+                    st.session_state.show_all = False
                     st.rerun()
         
-        # Show suggestion chips
+        # Chat input - only show if not complete
         if not st.session_state.show_recommendations:
-            col1, col2, col3, col4 = st.columns(4)
-            suggestions = [
-                ("Single room with wifi", "I need a single room with wifi"),
-                ("Budget 300k near campus", "Looking for hostel within 300k near campus"),
-                ("Female only hostel", "I want a female only hostel"),
-                ("Private bathroom", "I need a private bathroom")
-            ]
+            user_input = st.chat_input("Type your response here...")
             
-            for col, (label, text) in zip([col1, col2, col3, col4], suggestions):
-                with col:
-                    if st.button(label, use_container_width=True):
-                        # Add user message
-                        st.session_state.messages.append({"role": "user", "content": text})
-                        
-                        # Process with chatbot
-                        chatbot = st.session_state.chatbot
-                        
-                        # Extract preferences
-                        extracted = chatbot.update_preferences(text)
-                        
-                        # Check if we have all preferences
-                        missing = chatbot.get_missing_preferences()
-                        
-                        if not missing:
-                            # Get recommendations
-                            recommendations = chatbot.get_recommendations()
-                            if recommendations is not None and len(recommendations) > 0:
-                                st.session_state.recommendations = recommendations
-                                st.session_state.show_recommendations = True
-                                st.session_state.chat_complete = True
-                                
-                                # Add bot response
-                                response = chatbot.format_recommendation_message(recommendations)
-                                st.session_state.messages.append({"role": "assistant", "content": response})
-                            else:
-                                st.session_state.messages.append({"role": "assistant", "content": "I couldn't find matching hostels. Could you adjust your preferences?"})
-                        else:
-                            # Ask next question
-                            question = chatbot.get_next_question()
-                            st.session_state.messages.append({"role": "assistant", "content": question})
-                        
-                        st.rerun()
-    
-    # Chat input
-    if not st.session_state.show_recommendations:
-        user_input = st.chat_input("Type your message here...")
-        
-        if user_input:
-            # Add user message
-            st.session_state.messages.append({"role": "user", "content": user_input})
-            
-            # Process with chatbot
-            chatbot = st.session_state.chatbot
-            
-            # Extract preferences
-            extracted = chatbot.update_preferences(user_input)
-            
-            # Check if we have all preferences
-            missing = chatbot.get_missing_preferences()
-            
-            if not missing:
-                # Get recommendations
-                recommendations = chatbot.get_recommendations()
-                if recommendations is not None and len(recommendations) > 0:
-                    st.session_state.recommendations = recommendations
-                    st.session_state.show_recommendations = True
-                    st.session_state.chat_complete = True
+            if user_input:
+                # Add user message
+                st.session_state.messages.append({"role": "user", "content": user_input})
+                
+                # Process with chatbot
+                chatbot = st.session_state.chatbot
+                
+                if not chatbot.complete:
+                    # Process response
+                    response = chatbot.process_response(user_input)
                     
-                    # Add bot response
-                    response = chatbot.format_recommendation_message(recommendations)
-                    st.session_state.messages.append({"role": "assistant", "content": response})
-                else:
-                    st.session_state.messages.append({"role": "assistant", "content": "I couldn't find matching hostels. Could you adjust your preferences?"})
-            else:
-                # Ask next question
-                question = chatbot.get_next_question()
-                st.session_state.messages.append({"role": "assistant", "content": question})
+                    if response is not None:
+                        # Check if response is a recommendation (dict)
+                        if isinstance(response, pd.DataFrame):
+                            st.session_state.recommendations = response
+                            st.session_state.show_recommendations = True
+                            
+                            # Format recommendation message
+                            bot_message = chatbot.format_recommendation_message(response)
+                            st.session_state.messages.append({"role": "assistant", "content": bot_message})
+                        else:
+                            # It's a question
+                            st.session_state.messages.append({"role": "assistant", "content": response})
+                    else:
+                        st.session_state.messages.append({"role": "assistant", "content": "I'm sorry, I didn't understand. Can you please rephrase?"})
+                    
+                    st.rerun()
+        
+        # Show current preferences in sidebar
+        with st.sidebar:
+            st.header("Current Preferences")
             
-            st.rerun()
-    
-    # Show all hostels if requested
-    if 'show_all' in st.session_state and st.session_state.show_all:
-        st.markdown("---")
-        st.subheader("All Available Hostels")
-        st.dataframe(
-            df,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "Budget (UGX/sem)": st.column_config.NumberColumn("Budget (UGX)", format="UGX %d")
-            }
-        )
-        if st.button("Hide All Hostels"):
-            st.session_state.show_all = False
-            st.rerun()
-    
-    # Sidebar
-    with st.sidebar:
-        st.header("Current Preferences")
-        
-        if st.session_state.chatbot.preferences:
-            prefs = st.session_state.chatbot.preferences
-            st.write(f"**Budget:** UGX {prefs.get('budget', 'Not set'):,}" if 'budget' in prefs else "**Budget:** Not set")
-            st.write(f"**Gender:** {prefs.get('gender', 'Not set')}")
-            st.write(f"**Distance:** {prefs.get('distance', 'Not set')} km")
-            st.write(f"**WiFi:** {prefs.get('wifi', 'Not set')}")
-            st.write(f"**Water:** {prefs.get('water', 'Not set')}")
-            st.write(f"**Security:** {prefs.get('security', 'Not set')}")
-            st.write(f"**Room Type:** {prefs.get('room_type', 'Not set')}")
-            st.write(f"**Bathroom:** {prefs.get('bathroom', 'Not set')}")
-            st.write(f"**Kitchen:** {prefs.get('kitchen', 'Not set')}")
-        else:
-            st.write("No preferences set yet. Start chatting!")
-        
-        st.markdown("---")
-        if st.button("Reset Chat", use_container_width=True):
-            st.session_state.chatbot.reset()
-            st.session_state.messages = []
-            st.session_state.show_recommendations = False
-            st.session_state.recommendations = None
-            st.session_state.chat_complete = False
-            welcome_msg = "Hello! I'm your hostel assistant. I'll help you find the perfect hostel based on your preferences.\n\nWhat type of hostel are you looking for?"
-            st.session_state.messages.append({"role": "assistant", "content": welcome_msg})
-            st.rerun()
-        
-        st.markdown("---")
-        st.markdown("""
-        **How to use:**
-        1. Tell me what you're looking for
-        2. I'll ask for missing details
-        3. Get personalized recommendations
-        4. Refine or start over anytime
-        """)
+            if st.session_state.chatbot.preferences:
+                prefs = st.session_state.chatbot.preferences
+                st.write(f"**Budget:** UGX {prefs.get('budget', 'Not set'):,}" if 'budget' in prefs else "**Budget:** Not set")
+                st.write(f"**Gender:** {prefs.get('gender', 'Not set')}")
+                st.write(f"**Distance:** {prefs.get('distance', 'Not set')} km")
+                st.write(f"**WiFi:** {prefs.get('wifi', 'Not set')}")
+                st.write(f"**Water:** {prefs.get('water', 'Not set')}")
+                st.write(f"**Security:** {prefs.get('security', 'Not set')}")
+                st.write(f"**Room Type:** {prefs.get('room_type', 'Not set')}")
+                st.write(f"**Bathroom:** {prefs.get('bathroom', 'Not set')}")
+                st.write(f"**Kitchen:** {prefs.get('kitchen', 'Not set')}")
+            else:
+                st.write("No preferences set yet")
+            
+            st.markdown("---")
+            st.markdown("""
+            **How to use:**
+            1. Answer each question
+            2. I'll collect your preferences
+            3. Get AI-powered recommendations
+            4. View detailed hostel cards
+            5. Start over anytime
+            """)
 
 # ---------------------------------------
 # FOOTER
@@ -760,7 +690,7 @@ def main():
 st.markdown("""
 <div style="text-align: center; color: #666; padding: 20px; font-size: 14px; border-top: 1px solid #e0e0e0; margin-top: 30px;">
 Lira University Hostel AI Chatbot<br>
-Powered by AI | Natural Language Processing | Smart Recommendations
+Powered by AI | Machine Learning | Smart Recommendations
 </div>
 """, unsafe_allow_html=True)
 
