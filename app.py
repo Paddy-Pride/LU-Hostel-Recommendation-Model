@@ -1,305 +1,522 @@
 import streamlit as st
 import pandas as pd
 import joblib
+from nlp_engine import extract_preferences
+
 
 # ---------------------------------------
 # PAGE CONFIG
 # ---------------------------------------
+
 st.set_page_config(
     page_title="Lira University Hostel AI",
+    page_icon="🏠",
     layout="wide",
     initial_sidebar_state="expanded"
 )
 
-# ---------------------------------------
-# LOAD MODEL & DATA
-# ---------------------------------------
-model = joblib.load("hostel_ai_model.pkl")
-
-df = pd.read_excel("Lira_University_Hostel_Dataset.xlsx")
-
-# Clean budget
-df["Budget (UGX/sem)"] = (
-    df["Budget (UGX/sem)"]
-    .astype(str)
-    .str.replace(",", "")
-    .str.replace("UGX", "")
-    .str.strip()
-)
-
-df["Budget (UGX/sem)"] = pd.to_numeric(df["Budget (UGX/sem)"])
-
-df["Kitchen"] = df["Kitchen"].fillna(df["Kitchen"].mode()[0])
 
 # ---------------------------------------
-# CUSTOM CSS
+# LOAD DATA
 # ---------------------------------------
-st.markdown("""
+
+@st.cache_resource
+def load_model():
+    return joblib.load("hostel_ai_model.pkl")
+
+
+@st.cache_data
+def load_data():
+
+    df = pd.read_excel(
+        "Lira_University_Hostel_Dataset.xlsx"
+    )
+
+
+    df["Budget (UGX/sem)"] = (
+        df["Budget (UGX/sem)"]
+        .astype(str)
+        .str.replace(",", "")
+        .str.replace("UGX", "")
+        .str.strip()
+    )
+
+
+    df["Budget (UGX/sem)"] = pd.to_numeric(
+        df["Budget (UGX/sem)"],
+        errors="coerce"
+    )
+
+
+    df["Kitchen"] = df["Kitchen"].fillna(
+        df["Kitchen"].mode()[0]
+    )
+
+
+    return df
+
+
+
+model = load_model()
+df = load_data()
+
+
+
+# ---------------------------------------
+# STYLE
+# ---------------------------------------
+
+st.markdown(
+"""
 <style>
 
-.main{
-    background:#f5f7fa;
-}
-
-.block-container{
-    padding-top:2rem;
-}
-
-h1{
-    color:#003366;
-}
-
 .card{
-    background:white;
-    padding:20px;
-    border-radius:12px;
-    box-shadow:0px 2px 8px rgba(0,0,0,0.08);
+
+background:white;
+padding:20px;
+border-radius:15px;
+box-shadow:0px 2px 8px rgba(0,0,0,0.1);
+
 }
 
 .footer{
-    text-align:center;
-    color:gray;
-    padding:30px;
-    font-size:14px;
+
+text-align:center;
+color:gray;
+padding:30px;
+
 }
 
 </style>
-""", unsafe_allow_html=True)
+
+""",
+unsafe_allow_html=True
+)
+
+
 
 # ---------------------------------------
-# TITLE
+# HEADER
 # ---------------------------------------
 
-st.title("Lira University Hostel Recommendation System")
+st.title(
+"🏠 Lira University Hostel Recommendation AI"
+)
+
 
 st.write(
 """
-Use Artificial Intelligence to discover the hostel that best matches
-your accommodation preferences around Lira University.
+An AI-powered accommodation assistant that recommends
+hostels based on student preferences.
 """
 )
 
-# ---------------------------------------
-# SIDEBAR
-# ---------------------------------------
 
-st.sidebar.header("Student Preferences")
 
-budget = st.sidebar.number_input(
-    "Budget (UGX/semester)",
-    min_value=150000,
-    max_value=1000000,
-    value=300000,
-    step=10000
+# =====================================================
+# NLP AI ASSISTANT
+# =====================================================
+
+
+st.divider()
+
+st.subheader(
+"🤖 Chat With Hostel AI"
 )
 
-gender = st.sidebar.selectbox(
-    "Gender",
-    ["Mixed","Female Only","Male Only"]
+
+message = st.text_area(
+"Describe the hostel you need",
+placeholder=
+"I am a female student looking for a hostel near campus. My budget is 400000, I need WiFi, private bathroom and security."
 )
 
-distance = st.sidebar.slider(
-    "Maximum Distance (km)",
-    0.1,
-    5.0,
-    1.0
-)
 
-wifi = st.sidebar.selectbox(
-    "WiFi",
-    ["Yes","No"]
-)
 
-water = st.sidebar.selectbox(
-    "Water Availability",
-    [
-        "Always Available",
-        "Sometimes Interrupted",
-        "Irregular"
-    ]
-)
+if st.button(
+"Find My Hostel"
+):
 
-security = st.sidebar.selectbox(
-    "Security",
-    [
-        "24/7 Guard + CCTV",
-        "Security Guard",
-        "Gated Only",
-        "Basic"
-    ]
-)
 
-room = st.sidebar.selectbox(
-    "Room Type",
-    [
-        "Single",
-        "Double",
-        "Triple",
-        "Quad"
-    ]
-)
+    if message.strip()=="":
 
-bathroom = st.sidebar.selectbox(
-    "Bathroom",
-    [
-        "Private",
-        "Shared"
-    ]
-)
 
-kitchen = st.sidebar.selectbox(
-    "Kitchen",
-    [
-        "Private",
-        "Shared"
-    ]
-)
-
-# ---------------------------------------
-# PREDICT
-# ---------------------------------------
-
-if st.sidebar.button("Find Best Hostel"):
-
-    input_df = pd.DataFrame({
-
-        "Hostel":["Unknown"],
-
-        "Budget (UGX/sem)":[budget],
-
-        "Gender":[gender],
-
-        "Distance (km)":[distance],
-
-        "WiFi":[wifi],
-
-        "Water":[water],
-
-        "Security":[security],
-
-        "Room Type":[room],
-
-        "Bathroom":[bathroom],
-
-        "Kitchen":[kitchen]
-
-    })
-
-    score = model.predict(input_df)[0]
-
-    # Filter matching hostels
-
-    filtered = df.copy()
-
-    filtered = filtered[
-        (filtered["Gender"]==gender) &
-        (filtered["WiFi"]==wifi) &
-        (filtered["Room Type"]==room)
-    ]
-
-    if len(filtered)==0:
-        filtered = df
-
-    filtered["Difference"] = abs(filtered["Budget (UGX/sem)"]-budget)
-
-    filtered = filtered.sort_values(
-        by=["Difference","Recommendation Score"],
-        ascending=[True,False]
-    )
-
-    hostel = filtered.iloc[0]
-
-    st.success("Recommendation Generated Successfully")
-
-    col1,col2=st.columns([1,1])
-
-    with col1:
-
-        st.markdown("<div class='card'>",unsafe_allow_html=True)
-
-        st.subheader("Recommended Hostel")
-
-        st.write("###",hostel["Hostel"])
-
-        st.write("**Recommendation Score:**",round(score,2),"/5")
-
-        st.write("**Budget:** UGX {:,}".format(int(hostel["Budget (UGX/sem)"])))
-
-        st.write("**Distance:**",hostel["Distance (km)"],"km")
-
-        st.markdown("</div>",unsafe_allow_html=True)
-
-    with col2:
-
-        st.markdown("<div class='card'>",unsafe_allow_html=True)
-
-        st.subheader("Facilities")
-
-        st.write("WiFi:",hostel["WiFi"])
-
-        st.write("Water:",hostel["Water"])
-
-        st.write("Security:",hostel["Security"])
-
-        st.write("Room Type:",hostel["Room Type"])
-
-        st.write("Bathroom:",hostel["Bathroom"])
-
-        st.write("Kitchen:",hostel["Kitchen"])
-
-        st.markdown("</div>",unsafe_allow_html=True)
-
-    st.subheader("AI Recommendation")
-
-    if score>=4.5:
-
-        st.info(
-        """
-        This hostel is an excellent match for your
-        preferences and is highly recommended.
-        """
+        st.warning(
+            "Please describe your hostel requirements."
         )
 
-    elif score>=3.5:
-
-        st.info(
-        """
-        This hostel matches most of your
-        preferences and is recommended.
-        """
-        )
 
     else:
 
-        st.warning(
-        """
-        The available hostel does not fully
-        match your preferences.
-        Consider adjusting your requirements.
-        """
+
+        preferences = extract_preferences(
+            message
         )
 
+
+        st.success(
+            "AI understood your requirements"
+        )
+
+
+        with st.expander(
+            "View AI extracted preferences"
+        ):
+
+            st.json(
+                preferences
+            )
+
+
+
+        results = df.copy()
+
+
+
+        # -----------------------------
+        # SMART SCORING SYSTEM
+        # -----------------------------
+
+
+        budget = preferences["Budget (UGX/sem)"]
+
+
+        results["Budget Difference"] = abs(
+            results["Budget (UGX/sem)"] - budget
+        )
+
+
+        # Budget score 40%
+
+        results["Budget Score"] = (
+            1 -
+            (
+                results["Budget Difference"] /
+                budget
+            )
+        ).clip(0,1)
+
+
+
+        # Preference score 40%
+
+        results["Preference Score"] = 0
+
+
+
+        for col in [
+
+            "Gender",
+            "WiFi",
+            "Room Type",
+            "Bathroom",
+            "Kitchen",
+            "Security"
+
+        ]:
+
+
+            results.loc[
+                results[col] == preferences[col],
+                "Preference Score"
+            ] += 1
+
+
+
+        results["Preference Score"] = (
+            results["Preference Score"] / 6
+        )
+
+
+
+        # Distance score 20%
+
+        results["Distance Score"] = (
+
+            1 -
+            (
+                results["Distance (km)"] / 5
+            )
+
+        ).clip(0,1)
+
+
+
+        # Final AI score
+
+        results["AI Score"] = (
+
+            results["Budget Score"] * 0.4
+
+            +
+
+            results["Preference Score"] * 0.4
+
+            +
+
+            results["Distance Score"] * 0.2
+
+        )
+
+
+
+        results = results.sort_values(
+            "AI Score",
+            ascending=False
+        )
+
+
+
+        top_hostels = results.head(5)
+
+
+
+        st.divider()
+
+
+        st.subheader(
+            "🏆 Top AI Recommendations"
+        )
+
+
+
+        for index, hostel in top_hostels.iterrows():
+
+
+            with st.container():
+
+
+                st.markdown(
+                    "<div class='card'>",
+                    unsafe_allow_html=True
+                )
+
+
+                st.subheader(
+                    hostel["Hostel"]
+                )
+
+
+                score = hostel["AI Score"] * 100
+
+
+                st.success(
+                    f"AI Match: {score:.0f}%"
+                )
+
+
+                col1,col2,col3 = st.columns(3)
+
+
+                with col1:
+
+                    st.write(
+                        "💰 Budget"
+                    )
+
+                    st.write(
+                        f"UGX {int(hostel['Budget (UGX/sem)']):,}"
+                    )
+
+
+                with col2:
+
+                    st.write(
+                        "📍 Distance"
+                    )
+
+                    st.write(
+                        str(hostel["Distance (km)"])+" km"
+                    )
+
+
+                with col3:
+
+                    st.write(
+                        "📶 WiFi"
+                    )
+
+                    st.write(
+                        hostel["WiFi"]
+                    )
+
+
+
+                st.write(
+                    "Why recommended:"
+                )
+
+
+                if hostel["Budget Difference"] < 50000:
+
+                    st.write(
+                        "✅ Matches your budget"
+                    )
+
+
+                if hostel["WiFi"] == preferences["WiFi"]:
+
+                    st.write(
+                        "✅ Has your preferred WiFi"
+                    )
+
+
+                if hostel["Bathroom"] == preferences["Bathroom"]:
+
+                    st.write(
+                        "✅ Matches bathroom preference"
+                    )
+
+
+                if hostel["Room Type"] == preferences["Room Type"]:
+
+                    st.write(
+                        "✅ Matches room preference"
+                    )
+
+
+
+                st.markdown(
+                    "</div>",
+                    unsafe_allow_html=True
+                )
+
+
+                st.write("")
+
+
+
+# =====================================================
+# ORIGINAL SIDEBAR SEARCH
+# =====================================================
+
+
+st.sidebar.header(
+"Student Preferences"
+)
+
+
+budget = st.sidebar.number_input(
+"Budget (UGX/semester)",
+150000,
+1000000,
+300000,
+10000
+)
+
+
+gender = st.sidebar.selectbox(
+"Gender",
+df["Gender"].unique()
+)
+
+
+wifi = st.sidebar.selectbox(
+"WiFi",
+df["WiFi"].unique()
+)
+
+
+room = st.sidebar.selectbox(
+"Room Type",
+df["Room Type"].unique()
+)
+
+
+bathroom = st.sidebar.selectbox(
+"Bathroom",
+df["Bathroom"].unique()
+)
+
+
+kitchen = st.sidebar.selectbox(
+"Kitchen",
+df["Kitchen"].unique()
+)
+
+
+
+if st.sidebar.button(
+"Find Best Hostel"
+):
+
+
+    temp = df.copy()
+
+
+    temp["Difference"] = abs(
+        temp["Budget (UGX/sem)"] -
+        budget
+    )
+
+
+    temp=temp.sort_values(
+        [
+            "Difference",
+            "Recommendation Score"
+        ],
+        ascending=[
+            True,
+            False
+        ]
+    )
+
+
+    hostel=temp.iloc[0]
+
+
+    st.success(
+        "Recommendation Generated"
+    )
+
+
+    st.subheader(
+        "🏠 Recommended Hostel"
+    )
+
+
+    st.write(
+        hostel["Hostel"]
+    )
+
+
+    st.write(
+        f"Budget: UGX {int(hostel['Budget (UGX/sem)']):,}"
+    )
+
+
+
 # ---------------------------------------
-# DATA PREVIEW
+# DATA
 # ---------------------------------------
 
 st.divider()
 
-st.subheader("Available Hostels")
+st.subheader(
+"Available Hostels"
+)
+
 
 st.dataframe(
-    df,
-    use_container_width=True,
-    hide_index=True
+df,
+use_container_width=True,
+hide_index=True
 )
+
+
 
 # ---------------------------------------
 # FOOTER
 # ---------------------------------------
 
-st.markdown("""
-<div class='footer'>
-Lira University Hostel Recommendation System<br>
-Artificial Intelligence | Streamlit | Scikit-Learn
+st.markdown(
+"""
+<div class="footer">
+
+Lira University Hostel Recommendation AI<br>
+Machine Learning + NLP + Streamlit
+
 </div>
-""",unsafe_allow_html=True)
+""",
+unsafe_allow_html=True
+)
