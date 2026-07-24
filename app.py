@@ -155,177 +155,19 @@ kitchen = st.sidebar.selectbox(
         "Shared"
     ]
 )
-# ---------------------------------------
-# AI CHAT ASSISTANT
-# ---------------------------------------
-
-st.divider()
-
-st.subheader("🤖 Chat With Hostel AI")
-
-st.write(
-    "Describe your ideal hostel and AI will understand your preferences."
-)
-
-
-user_message = st.text_area(
-    "Example: I am a female student looking for a hostel near campus with WiFi, private bathroom and a budget of 350000"
-)
-
-
-if st.button("Find Hostel Using AI"):
-
-    if user_message.strip() == "":
-
-        st.warning(
-            "Please describe the hostel you are looking for."
-        )
-
-    else:
-
-        preferences = extract_preferences(
-            user_message
-        )
-
-
-        st.success(
-            "AI understood your requirements:"
-        )
-
-
-        st.json(
-            preferences
-        )
-
-
-        # -------------------------
-        # FIND MATCHING HOSTELS
-        # -------------------------
-
-        results = df.copy()
-
-
-        results["Difference"] = abs(
-            results["Budget (UGX/sem)"]
-            -
-            preferences["Budget (UGX/sem)"]
-        )
-
-
-        # Match important preferences
-
-        results["Match Score"] = 0
-
-
-        results.loc[
-            results["Gender"] == preferences["Gender"],
-            "Match Score"
-        ] += 1
-
-
-        results.loc[
-            results["WiFi"] == preferences["WiFi"],
-            "Match Score"
-        ] += 1
-
-
-        results.loc[
-            results["Room Type"] == preferences["Room Type"],
-            "Match Score"
-        ] += 1
-
-
-        results.loc[
-            results["Bathroom"] == preferences["Bathroom"],
-            "Match Score"
-        ] += 1
-
-
-        results.loc[
-            results["Kitchen"] == preferences["Kitchen"],
-            "Match Score"
-        ] += 1
-
-
-
-        # Sort recommendation
-
-        results = results.sort_values(
-            by=[
-                "Match Score",
-                "Difference",
-                "Recommendation Score"
-            ],
-            ascending=[
-                False,
-                True,
-                False
-            ]
-        )
-
-
-        recommended = results.iloc[0]
-
-
-
-        st.divider()
-
-
-        st.subheader(
-            "🏠 AI Recommended Hostel"
-        )
-
-
-        st.write(
-            "###",
-            recommended["Hostel"]
-        )
-
-
-        st.write(
-            "AI Match Score:",
-            str(
-                round(
-                    (recommended["Match Score"]/5)*100
-                )
-            )
-            + "%"
-        )
-
-
-        st.write(
-            "Budget:",
-            f"UGX {int(recommended['Budget (UGX/sem)']):,}"
-        )
-
-
-        st.write(
-            "Distance:",
-            recommended["Distance (km)"],
-            "km"
-        )
-
-
-        st.subheader(
-            "Why AI Selected This Hostel"
-        )
 # -------------------------
 # AI EXPLANATION
 # -------------------------
 
 st.divider()
 
-st.subheader(
-    "🤖 AI Explanation"
-)
+st.subheader("🤖 AI Explanation")
 
 
 explanation = []
 
 
-# Budget explanation
-
-if recommended["Difference"] == 0:
+if recommended["Difference"] <= 0:
 
     explanation.append(
         "✅ The hostel price exactly matches your budget."
@@ -338,18 +180,12 @@ else:
     )
 
 
-
-# WiFi explanation
-
 if recommended["WiFi"] == preferences["WiFi"]:
 
     explanation.append(
         "✅ It provides the WiFi option you requested."
     )
 
-
-
-# Bathroom explanation
 
 if recommended["Bathroom"] == preferences["Bathroom"]:
 
@@ -358,18 +194,12 @@ if recommended["Bathroom"] == preferences["Bathroom"]:
     )
 
 
-
-# Room explanation
-
 if recommended["Room Type"] == preferences["Room Type"]:
 
     explanation.append(
         "✅ It matches your preferred room type."
     )
 
-
-
-# Distance explanation
 
 if recommended["Distance (km)"] <= preferences["Distance (km)"]:
 
@@ -378,18 +208,16 @@ if recommended["Distance (km)"] <= preferences["Distance (km)"]:
     )
 
 
-
 for item in explanation:
 
     st.write(item)
 
 
 
-# Confidence
-
 match_percentage = (
-    recommended["Match Score"]/5
-)*100
+    recommended["Match Score"] / 5
+) * 100
+
 
 
 if match_percentage >= 80:
@@ -398,29 +226,19 @@ if match_percentage >= 80:
         "Recommendation Confidence: High"
     )
 
+
 elif match_percentage >= 50:
 
     st.info(
         "Recommendation Confidence: Medium"
     )
 
+
 else:
 
     st.warning(
         "Recommendation Confidence: Low"
     )
-
-        if recommended["WiFi"] == preferences["WiFi"]:
-            st.write("✅ Has your preferred WiFi option")
-
-
-        if recommended["Bathroom"] == preferences["Bathroom"]:
-            st.write("✅ Matches your bathroom preference")
-
-
-        if recommended["Room Type"] == preferences["Room Type"]:
-            st.write("✅ Matches your room preference")
-
 
 # ---------------------------------------
 # PREDICT
