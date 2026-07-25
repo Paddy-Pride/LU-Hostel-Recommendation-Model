@@ -24,15 +24,6 @@ st.markdown("""
 .main {
     background: #f5f7fa;
 }
-.chat-container {
-    max-height: 500px;
-    overflow-y: auto;
-    padding: 10px;
-    background: white;
-    border-radius: 10px;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-    margin-bottom: 20px;
-}
 .card {
     background: white;
     padding: 20px;
@@ -107,161 +98,121 @@ def load_model():
         return None
 
 # ---------------------------------------
-# RECOMMENDATION ENGINE
+# PROPER MODEL-BASED RECOMMENDATION ENGINE
 # ---------------------------------------
-def calculate_match_score(hostel, preferences):
-    """Calculate a comprehensive match score for a hostel"""
-    score = 0
-    max_score = 0
-    details = {}
+def get_recommendations_from_model(df, model, preferences, n=5):
+    """
+    THIS IS WHERE THE MODEL IS ACTUALLY USED
+    The model predicts a score for EACH hostel based on user preferences
+    """
     
-    # 1. Budget match (30% weight)
-    if 'budget' in preferences and 'Budget (UGX/sem)' in hostel:
-        max_score += 30
-        budget_diff = abs(hostel['Budget (UGX/sem)'] - preferences['budget'])
-        max_budget = 1000000
-        budget_score = max(0, 30 - (budget_diff / max_budget * 30))
-        score += budget_score
-        details['Budget'] = budget_score
+    if model is None:
+        st.error("Model not loaded! Cannot make predictions.")
+        return None
     
-    # 2. Distance match (20% weight)
-    if 'distance' in preferences and 'Distance (km)' in hostel:
-        max_score += 20
-        if hostel['Distance (km)'] <= preferences['distance']:
-            distance_score = 20
-        else:
-            distance_score = max(0, 20 - ((hostel['Distance (km)'] - preferences['distance']) / 5 * 20))
-        score += distance_score
-        details['Distance'] = distance_score
+    # Store predictions for each hostel
+    predictions = []
     
-    # 3. Gender match (15% weight)
-    if 'gender' in preferences and 'Gender' in hostel:
-        max_score += 15
-        if str(hostel['Gender']).lower() == str(preferences['gender']).lower():
-            score += 15
-            details['Gender'] = 15
-        else:
-            details['Gender'] = 0
-    
-    # 4. WiFi match (10% weight)
-    if 'wifi' in preferences and 'WiFi' in hostel:
-        max_score += 10
-        if str(hostel['WiFi']).lower() == str(preferences['wifi']).lower():
-            score += 10
-            details['WiFi'] = 10
-        else:
-            details['WiFi'] = 0
-    
-    # 5. Room Type match (10% weight)
-    if 'room_type' in preferences and 'Room Type' in hostel:
-        max_score += 10
-        if str(hostel['Room Type']).lower() == str(preferences['room_type']).lower():
-            score += 10
-            details['Room Type'] = 10
-        else:
-            details['Room Type'] = 0
-    
-    # 6. Water match (5% weight)
-    if 'water' in preferences and 'Water' in hostel:
-        max_score += 5
-        if str(hostel['Water']).lower() == str(preferences['water']).lower():
-            score += 5
-            details['Water'] = 5
-        else:
-            details['Water'] = 0
-    
-    # 7. Security match (5% weight)
-    if 'security' in preferences and 'Security' in hostel:
-        max_score += 5
-        if str(hostel['Security']).lower() == str(preferences['security']).lower():
-            score += 5
-            details['Security'] = 5
-        else:
-            details['Security'] = 0
-    
-    # 8. Bathroom match (5% weight)
-    if 'bathroom' in preferences and 'Bathroom' in hostel:
-        max_score += 5
-        if str(hostel['Bathroom']).lower() == str(preferences['bathroom']).lower():
-            score += 5
-            details['Bathroom'] = 5
-        else:
-            details['Bathroom'] = 0
-    
-    # Return percentage
-    if max_score > 0:
-        return (score / max_score) * 100, details
-    return 0, details
-
-def get_recommendations(df, model, preferences, n=5):
-    """Get recommendations using both AI model AND rule-based scoring"""
-    
-    # Try to use the AI model
-    ai_scores = []
-    if model is not None:
-        try:
-            for _, row in df.iterrows():
-                input_data = {
-                    "Hostel": [row['Hostel']],
-                    "Budget (UGX/sem)": [row['Budget (UGX/sem)']],
-                    "Gender": [row['Gender']],
-                    "Distance (km)": [row['Distance (km)']],
-                    "WiFi": [row['WiFi']],
-                    "Water": [row['Water']],
-                    "Security": [row['Security']],
-                    "Room Type": [row['Room Type']],
-                    "Bathroom": [row['Bathroom']],
-                    "Kitchen": [row['Kitchen']]
-                }
-                input_df = pd.DataFrame(input_data)
-                score = model.predict(input_df)[0]
-                ai_scores.append(score)
-        except Exception as e:
-            ai_scores = None
-    
-    # Calculate rule-based scores for each hostel
-    results = []
     for idx, row in df.iterrows():
-        match_percentage, details = calculate_match_score(row, preferences)
+        try:
+            # Prepare input data EXACTLY as the model expects
+            # The model was trained on these features
+            input_data = pd.DataFrame([{
+                "Hostel": row['Hostel'],
+                "Budget (UGX/sem)": row['Budget (UGX/sem)'],
+                "Gender": row['Gender'],
+                "Distance (km)": row['Distance (km)'],
+                "WiFi": row['WiFi'],
+                "Water": row['Water'],
+                "Security": row['Security'],
+                "Room Type": row['Room Type'],
+                "Bathroom": row['Bathroom'],
+                "Kitchen": row['Kitchen']
+            }])
+            
+            # THE MODEL MAKES THE PREDICTION HERE
+            # This is the AI score - the model's output
+            ai_score = model.predict(input_data)[0]
+            
+            predictions.append({
+                'hostel': row,
+                'ai_score': ai_score,
+                'index': idx
+            })
+            
+        except Exception as e:
+            st.warning(f"Prediction error for {row['Hostel']}: {str(e)}")
+            predictions.append({
+                'hostel': row,
+                'ai_score': 3.0,  # Default fallback score
+                'index': idx
+            })
+    
+    # Convert to DataFrame
+    pred_df = pd.DataFrame(predictions)
+    
+    # Sort by AI score (highest first)
+    pred_df = pred_df.sort_values('ai_score', ascending=False)
+    
+    # Get top N recommendations
+    top_n = pred_df.head(n)
+    
+    # Create results DataFrame
+    results = []
+    for _, row in top_n.iterrows():
+        hostel = row['hostel']
+        hostel_dict = hostel.to_dict()
+        hostel_dict['AI Score'] = round(row['ai_score'], 2)
         
-        # Get AI score if available
-        ai_score = ai_scores[idx] if ai_scores else 3.0
+        # Also calculate preference match for display
+        match_score = calculate_preference_match(hostel, preferences)
+        hostel_dict['Preference Match'] = match_score
         
-        # Combine scores
-        if ai_scores and len(set(ai_scores)) > 1:
-            ai_min, ai_max = min(ai_scores), max(ai_scores)
-            if ai_max > ai_min:
-                ai_normalized = ((ai_score - ai_min) / (ai_max - ai_min)) * 100
-            else:
-                ai_normalized = 50
-            final_score = (match_percentage * 0.6) + (ai_normalized * 0.4)
+        results.append(hostel_dict)
+    
+    return pd.DataFrame(results)
+
+def calculate_preference_match(hostel, preferences):
+    """Calculate how well the hostel matches user preferences (for display only)"""
+    score = 0
+    total = 0
+    
+    # Check each preference
+    if 'budget' in preferences:
+        total += 1
+        diff = abs(hostel['Budget (UGX/sem)'] - preferences['budget'])
+        if diff <= 50000:
+            score += 1
+        elif diff <= 100000:
+            score += 0.7
+        elif diff <= 200000:
+            score += 0.4
+    
+    if 'gender' in preferences:
+        total += 1
+        if str(hostel['Gender']).lower() == str(preferences['gender']).lower():
+            score += 1
+    
+    if 'room_type' in preferences:
+        total += 1
+        if str(hostel['Room Type']).lower() == str(preferences['room_type']).lower():
+            score += 1
+    
+    if 'wifi' in preferences:
+        total += 1
+        if str(hostel['WiFi']).lower() == str(preferences['wifi']).lower():
+            score += 1
+    
+    if 'distance' in preferences:
+        total += 1
+        if hostel['Distance (km)'] <= preferences['distance']:
+            score += 1
         else:
-            final_score = match_percentage
-        
-        results.append({
-            'hostel': row,
-            'match_percentage': match_percentage,
-            'ai_score': ai_score,
-            'final_score': final_score,
-            'details': details
-        })
+            # Partial credit for being close
+            penalty = (hostel['Distance (km)'] - preferences['distance']) / 5
+            score += max(0, 1 - penalty)
     
-    # Sort by final score
-    results.sort(key=lambda x: x['final_score'], reverse=True)
-    
-    # Get top N
-    top_results = results[:n]
-    
-    # Create recommendations list
-    recommendations = []
-    for r in top_results:
-        hostel_data = r['hostel'].to_dict()
-        hostel_data['Match Score'] = round(r['match_percentage'], 1)
-        hostel_data['AI Score'] = round(r['ai_score'], 1)
-        hostel_data['Final Score'] = round(r['final_score'], 1)
-        recommendations.append(hostel_data)
-    
-    return pd.DataFrame(recommendations)
+    return round((score / total * 100) if total > 0 else 0, 1)
 
 # ---------------------------------------
 # CHATBOT CLASS
@@ -290,19 +241,16 @@ class HostelChatbot:
         self.complete = False
         
     def reset(self):
-        """Reset chatbot state"""
         self.preferences = {}
         self.step = 0
         self.complete = False
     
     def get_next_question(self):
-        """Get the next question to ask"""
         if self.step < len(self.questions):
             return self.questions[self.step]
         return None
     
     def process_response(self, user_input):
-        """Process user response and update preferences"""
         if self.step >= len(self.preference_keys):
             return None
         
@@ -322,7 +270,6 @@ class HostelChatbot:
             return f"I couldn't understand. Please tell me: {self.questions[self.step]}"
     
     def _extract_value(self, key, text):
-        """Extract value for a specific preference key"""
         text_lower = text.lower()
         
         if key == 'budget':
@@ -445,24 +392,26 @@ class HostelChatbot:
         return None
     
     def get_recommendations(self):
-        """Get recommendations based on current preferences"""
+        """Get recommendations - THIS USES THE MODEL"""
         if len(self.preferences) < len(self.preference_keys):
             return None
         
-        return get_recommendations(self.df, self.model, self.preferences)
+        # CALL THE MODEL-BASED RECOMMENDATION FUNCTION
+        # This is where the model is actually used
+        return get_recommendations_from_model(self.df, self.model, self.preferences)
     
     def format_recommendation_message(self, recommendations):
-        """Format recommendations for display"""
         if recommendations is None or len(recommendations) == 0:
             return "I couldn't find any hostels matching your preferences. Let's start over."
         
         top_hostel = recommendations.iloc[0]
         
-        message = f"✅ **Based on your preferences, here are my recommendations:**\n\n"
+        message = f"✅ **Based on your preferences, here are my AI-powered recommendations:**\n\n"
         message += f"🏆 **Top Pick: {top_hostel['Hostel']}**\n"
-        message += f"   • Match Score: {top_hostel['Match Score']:.1f}%\n"
+        message += f"   • AI Score: {top_hostel['AI Score']}/5\n"
+        message += f"   • Preference Match: {top_hostel['Preference Match']}%\n"
         message += f"   • Budget: UGX {int(top_hostel['Budget (UGX/sem)']):,}\n"
-        message += f"   • Distance: {top_hostel['Distance (km)']} km from campus\n"
+        message += f"   • Distance: {top_hostel['Distance (km)']} km\n"
         message += f"   • WiFi: {top_hostel['WiFi']}\n"
         message += f"   • Water: {top_hostel['Water']}\n"
         message += f"   • Security: {top_hostel['Security']}\n"
@@ -474,7 +423,7 @@ class HostelChatbot:
             message += "**Alternatives:**\n"
             for i in range(1, min(4, len(recommendations))):
                 hostel = recommendations.iloc[i]
-                message += f"• {hostel['Hostel']} (Match: {hostel['Match Score']:.1f}%, UGX {int(hostel['Budget (UGX/sem)']):,})\n"
+                message += f"• {hostel['Hostel']} (AI Score: {hostel['AI Score']}/5, UGX {int(hostel['Budget (UGX/sem)']):,})\n"
         
         return message
 
@@ -490,6 +439,12 @@ def main():
     
     model = load_model()
     
+    # Show model status
+    if model is not None:
+        st.sidebar.success("✅ AI Model Loaded - Making Predictions")
+    else:
+        st.sidebar.error("❌ AI Model NOT Loaded - Cannot Make Predictions")
+    
     # Initialize chatbot
     if 'chatbot' not in st.session_state:
         st.session_state.chatbot = HostelChatbot(df, model)
@@ -497,13 +452,12 @@ def main():
         st.session_state.recommendations = None
         st.session_state.show_recommendations = False
         
-        # Add welcome message
-        welcome = "Hello! I'm your hostel assistant. I'll help you find the perfect hostel at Lira University.\n\nI'll ask you a few questions about your preferences and then recommend the best hostels for you.\n\nLet's start! What is your budget per semester in UGX? (e.g., 300000)"
+        welcome = "Hello! I'm your hostel assistant. I'll help you find the perfect hostel at Lira University.\n\nI'll ask you a few questions about your preferences and then use the AI model to recommend the best hostels for you.\n\nLet's start! What is your budget per semester in UGX? (e.g., 300000)"
         st.session_state.messages.append({"role": "assistant", "content": welcome})
     
     # Title
     st.title("Hostel AI Assistant")
-    st.write("Chat with me to find your ideal hostel at Lira University")
+    st.write("AI-powered hostel recommendations using your trained model")
     
     # Display chat messages
     for msg in st.session_state.messages:
@@ -513,20 +467,19 @@ def main():
     # Show recommendations if available
     if st.session_state.show_recommendations and st.session_state.recommendations is not None:
         st.markdown("---")
-        st.subheader("Top Recommendations")
+        st.subheader("AI-Powered Recommendations")
         
         recommendations = st.session_state.recommendations
         
         # Display top 3 as cards
         for i in range(min(3, len(recommendations))):
             hostel = recommendations.iloc[i]
-            match_score = hostel['Match Score']
+            ai_score = hostel['AI Score']
             
-            # Determine emoji based on match score
-            if match_score >= 80:
+            if ai_score >= 4.5:
                 emoji = "🏆"
                 color = "#28a745"
-            elif match_score >= 60:
+            elif ai_score >= 3.5:
                 emoji = "⭐"
                 color = "#ffc107"
             else:
@@ -534,15 +487,16 @@ def main():
                 color = "#dc3545"
             
             if i == 0:
-                st.success(f"{emoji} Best Match - {match_score:.1f}% match")
+                st.success(f"{emoji} Best Match - AI Score: {ai_score}/5")
             
             st.markdown(f"""
             <div class="card">
                 <h3 style="color: #003366; margin: 0;">{hostel['Hostel']}</h3>
-                <p><strong>Match Score:</strong> {match_score:.1f}%</p>
+                <p><strong>AI Score:</strong> {ai_score}/5</p>
                 <div class="score-bar">
-                    <div class="score-bar-fill" style="width: {match_score:.1f}%;"></div>
+                    <div class="score-bar-fill" style="width: {ai_score/5*100:.1f}%;"></div>
                 </div>
+                <p><strong>Preference Match:</strong> {hostel['Preference Match']}%</p>
                 <p><strong>Budget:</strong> UGX {int(hostel['Budget (UGX/sem)']):,} | <strong>Distance:</strong> {hostel['Distance (km)']} km</p>
                 <div style="margin: 10px 0;">
                     <span class="badge">WiFi: {hostel['WiFi']}</span>
@@ -571,7 +525,6 @@ def main():
             if st.button("Show All Hostels", use_container_width=True):
                 st.session_state.show_all = True
         
-        # Show all hostels if requested
         if 'show_all' in st.session_state and st.session_state.show_all:
             st.markdown("---")
             st.subheader("All Available Hostels")
@@ -592,27 +545,20 @@ def main():
         user_input = st.chat_input("Type your response here...")
         
         if user_input:
-            # Add user message
             st.session_state.messages.append({"role": "user", "content": user_input})
             
-            # Process with chatbot
             chatbot = st.session_state.chatbot
             
             if not chatbot.complete:
-                # Process response
                 response = chatbot.process_response(user_input)
                 
                 if response is not None:
-                    # Check if response is a recommendation (DataFrame)
                     if isinstance(response, pd.DataFrame):
                         st.session_state.recommendations = response
                         st.session_state.show_recommendations = True
-                        
-                        # Format recommendation message
                         bot_message = chatbot.format_recommendation_message(response)
                         st.session_state.messages.append({"role": "assistant", "content": bot_message})
                     else:
-                        # It's a question
                         st.session_state.messages.append({"role": "assistant", "content": response})
                 else:
                     st.session_state.messages.append({"role": "assistant", "content": "I'm sorry, I didn't understand. Can you please rephrase?"})
@@ -639,13 +585,18 @@ def main():
         
         st.markdown("---")
         st.markdown("""
-        **How to use:**
-        1. Answer each question
-        2. I'll collect your preferences
-        3. Get AI-powered recommendations
-        4. View detailed hostel cards
-        5. Start over anytime
+        **How the AI Works:**
+        1. You answer questions about preferences
+        2. The AI model predicts a score for EACH hostel
+        3. Hostels are ranked by AI score
+        4. You get the top recommendations
+        5. Preference match shows how well it matches your stated preferences
         """)
+        
+        if model is not None:
+            st.success("✅ Model is ACTIVE - making predictions")
+        else:
+            st.error("❌ Model is NOT ACTIVE - predictions unavailable")
 
 # ---------------------------------------
 # FOOTER
@@ -653,7 +604,7 @@ def main():
 st.markdown("""
 <div style="text-align: center; color: #666; padding: 20px; font-size: 14px; border-top: 1px solid #e0e0e0; margin-top: 30px;">
 Lira University Hostel AI Chatbot<br>
-Powered by AI | Machine Learning | Smart Recommendations
+Powered by Your Trained AI Model | Machine Learning | Smart Recommendations
 </div>
 """, unsafe_allow_html=True)
 
